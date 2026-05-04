@@ -15,6 +15,8 @@ pub struct SystemData {
     pub mem_total_gb: f32,
     pub swap_used_gb: f32,
     pub swap_total_gb: f32,
+    pub storage_total_gb: f32,
+    pub storage_used_gb: f32, 
 }
 
 pub struct NetworkData {
@@ -38,6 +40,8 @@ impl AppState {
                 mem_total_gb: 0.0,
                 swap_used_gb: 0.0,
                 swap_total_gb: 0.0,
+                storage_total_gb: 0.0,
+                storage_used_gb: 0.0,
             },
             network: NetworkData {
                 interface: "eth0".to_string(),
