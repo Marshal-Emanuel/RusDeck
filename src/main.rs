@@ -17,6 +17,7 @@ fn main() {
 
         let cpu = state_guard.system.cpu_usage;
         let freq = state_guard.system.cpu_freq_ghz;
+        let load = state_guard.system.cpu_load;
         let temp = state_guard.system.cpu_temp_c;
         let mem_used = state_guard.system.mem_used_gb;
         let mem_total = state_guard.system.mem_total_gb;
@@ -27,24 +28,28 @@ fn main() {
         let iface = &state_guard.network.interface;
         let rx = state_guard.network.rx_rate;
         let tx = state_guard.network.tx_rate;
+        let proc_count = state_guard.processes.len();
+        let log_count = state_guard.logs.len();
 
-        println!("╔══════════════════════════════════════╗");
-        println!("║           RUSDECK MONITOR             ║");
-        println!("╠══════════════════════════════════════╣");
-        println!("║  CPU: {:>6.1}% @ {:.2} GHz           ║", cpu, freq);
+        println!("╔═══════════════════════════════════════════════════╗");
+        println!("║                  RUSDECK MONITOR                  ║");
+        println!("╠═══════════════════════════════════════════════════╣");
+        println!("║  CPU: {:>5.1}% @ {:.2} GHz   Load: {:.2}           ║", cpu, freq, load);
         if let Some(t) = temp {
-            println!("║  TEMP: {:.1}°C                       ║", t);
+            println!("║  TEMP: {:.1}°C                                      ║", t);
         } else {
-            println!("║  TEMP: N/A                           ║");
+            println!("║  TEMP: N/A                                         ║");
         }
-        println!("╠══════════════════════════════════════╣");
-        println!("║  RAM:  {:.1} GB / {:.1} GB            ║", mem_used, mem_total);
-        println!("║  SWAP: {:.1} GB / {:.1} GB            ║", swap_used, swap_total);
-        println!("╠══════════════════════════════════════╣");
-        println!("║  DISK: {:.1} GB / {:.1} GB            ║", storage_used, storage_total);
-        println!("╠══════════════════════════════════════╣");
-        println!("║  NET: {} RX: {} TX: {}  ║", iface, rx, tx);
-        println!("╚══════════════════════════════════════╝");
+        println!("╠═══════════════════════════════════════════════════╣");
+        println!("║  RAM:  {:.1} GB / {:.1} GB                          ║", mem_used, mem_total);
+        println!("║  SWAP: {:.1} GB / {:.1} GB                          ║", swap_used, swap_total);
+        println!("╠═══════════════════════════════════════════════════╣");
+        println!("║  DISK: {:.1} GB / {:.1} GB                          ║", storage_used, storage_total);
+        println!("╠═══════════════════════════════════════════════════╣");
+        println!("║  NET: {} RX: {:.0} TX: {:.0}        ║", iface, rx, tx);
+        println!("╠═══════════════════════════════════════════════════╣");
+        println!("║  Processes: {:>2}  Logs: {:>3}                        ║", proc_count, log_count);
+        println!("╚═══════════════════════════════════════════════════╝");
 
         drop(state_guard);
         std::thread::sleep(Duration::from_secs(1));
