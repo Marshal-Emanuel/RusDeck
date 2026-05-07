@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 sysinfo = "0.30"
 chrono = "0.4"
+egui = "0.27"
+eframe = { version = "0.27", features = ["default"] }
