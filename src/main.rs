@@ -6,6 +6,7 @@ mod ui;
 use std::sync::{Arc, RwLock};
 use app::AppState;
 use theme::Theme;
+use ui::background::BackgroundCache;
 
 fn main() -> eframe::Result<()> {
     let state = Arc::new(RwLock::new(AppState::new()));
@@ -31,6 +32,7 @@ fn main() -> eframe::Result<()> {
                 state,
                 theme: Theme::default_white(),
                 repaint_request_rx,
+                bg_cache: BackgroundCache::new(),
             })
         }),
     )
@@ -40,6 +42,7 @@ struct RusDeckApp {
     state: Arc<RwLock<AppState>>,
     theme: Theme,
     repaint_request_rx: std::sync::mpsc::Receiver<()>,
+    bg_cache: BackgroundCache,
 }
 
 impl eframe::App for RusDeckApp {
@@ -49,6 +52,6 @@ impl eframe::App for RusDeckApp {
         }
 
         let state = self.state.read().unwrap();
-        ui::draw(ctx, &state, &self.theme);
+        ui::draw(ctx, &state, &self.theme, &mut self.bg_cache);
     }
 }

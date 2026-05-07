@@ -1,10 +1,11 @@
-mod background;
+pub mod background;
 mod layout;
 pub mod panels;
 
 use egui::{Color32, Pos2, Vec2, Rect, Align2, FontId};
 use crate::app::AppState;
 use crate::theme::Theme;
+use background::BackgroundCache;
 use layout::Layout;
 use panels::filesystem::draw_filesystem;
 use panels::hardware::draw_hardware;
@@ -26,7 +27,7 @@ pub fn setup_visuals(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme) {
+pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache) {
     egui::Area::new("root".into())
         .fixed_pos(Pos2::new(0.0, 0.0))
         .show(ctx, |ui| {
@@ -35,7 +36,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme) {
             let screen_h = avail.height().max(600.0);
             let painter = ui.painter_at(avail);
 
-            background::draw_background(&painter, Rect::from_min_size(Pos2::ZERO, egui::vec2(screen_w, screen_h)), theme);
+            background::draw_background(bg_cache, ctx, &painter, Rect::from_min_size(Pos2::ZERO, egui::vec2(screen_w, screen_h)), theme);
 
             let layout = Layout::new(screen_w, screen_h);
 
@@ -46,7 +47,6 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme) {
             draw_system_logs(&painter, layout.system_logs, state, theme);
             draw_load_history(&painter, layout.load_history, state, theme);
 
-            // Top bar
             let tb = &layout.topbar;
             painter.line_segment(
                 [Pos2::new(tb.left(), tb.bottom()), Pos2::new(tb.right(), tb.bottom())],
