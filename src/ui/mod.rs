@@ -41,11 +41,11 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, _bg_cache: &mu
             let layout = Layout::new(screen_w, screen_h);
 
             draw_hardware(&painter, layout.hardware, state, theme);
-            draw_filesystem(&painter, layout.filesystem, state, theme);
+            draw_filesystem(&painter, layout.storage, state, theme);
+            draw_load_history(&painter, layout.load_history, state, theme);
             draw_network(&painter, layout.network, state, theme);
             draw_processes(&painter, layout.processes, state, theme);
             draw_system_logs(&painter, layout.system_logs, state, theme);
-            draw_load_history(&painter, layout.load_history, state, theme);
 
             let tb = &layout.topbar;
             painter.line_segment(
