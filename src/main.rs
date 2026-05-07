@@ -47,6 +47,11 @@ struct RusDeckApp {
 
 impl eframe::App for RusDeckApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
         while let Ok(_) = self.repaint_request_rx.try_recv() {
             ctx.request_repaint();
         }
