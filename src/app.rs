@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-pub const HISTORY_MAX: usize = 60;
+pub const HISTORY_MAX: usize = 20;
 
 pub struct AppState {
     pub system: SystemData,
@@ -21,7 +21,6 @@ pub struct ProcessInfo {
 pub struct LogLine {
     pub timestamp: String,
     pub message: String,
-    pub age: f32,
 }
 
 pub struct SystemData {

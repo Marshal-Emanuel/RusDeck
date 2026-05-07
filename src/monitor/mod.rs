@@ -155,7 +155,6 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>
                         state_guard.logs.push_back(LogLine {
                             timestamp: log.timestamp.clone(),
                             message: log.message.clone(),
-                            age: log.age,
                         });
                     }
                 }

@@ -6,7 +6,6 @@ use std::path::PathBuf;
 pub struct LogLine {
     pub timestamp: String,
     pub message: String,
-    pub age: f32,
 }
 
 pub struct LogBuffer {
@@ -101,7 +100,7 @@ fn read_new_lines(&mut self) -> Option<Vec<LogLine>> {
             .filter(|line| !line.is_empty())
             .map(|line| {
                 let (ts, msg) = Self::parse_line(line);
-                LogLine { timestamp: ts, message: msg, age: 0.0 }
+                LogLine { timestamp: ts, message: msg }
             })
             .collect();
 
@@ -109,14 +108,7 @@ fn read_new_lines(&mut self) -> Option<Vec<LogLine>> {
             return None;
         }
 
-        let total = lines.len();
-        let mut result = Vec::with_capacity(total);
-        for (i, mut line) in lines.into_iter().enumerate() {
-            line.age = i as f32 / total as f32;
-            result.push(line);
-        }
-
-        Some(result)
+        Some(lines)
     }
 
     fn parse_line(line: &str) -> (String, String) {
