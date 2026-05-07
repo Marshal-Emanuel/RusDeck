@@ -52,9 +52,8 @@ impl eframe::App for RusDeckApp {
             return;
         }
 
-        while let Ok(_) = self.repaint_request_rx.try_recv() {
-            ctx.request_repaint();
-        }
+        let _ = self.repaint_request_rx.try_recv();
+        ctx.request_repaint();
 
         let state = self.state.read().unwrap();
         ui::draw(ctx, &state, &self.theme, &mut self.bg_cache);
