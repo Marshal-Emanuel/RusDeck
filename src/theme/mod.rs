@@ -1,5 +1,6 @@
 use egui::Color32;
 
+#[derive(Clone)]
 pub struct Theme {
     pub background: Color32,
     pub accent: Color32,
