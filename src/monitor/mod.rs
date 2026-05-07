@@ -15,6 +15,7 @@ use crate::app::{AppState, HISTORY_MAX, ProcessInfo, LogLine};
 
 pub fn start_monitor_thread(state: Arc<RwLock<AppState>>) {
     let mut log_buffer = logs::LogBuffer::new(200);
+    let mut temp_monitor = temp::TempMonitor::new();
 
     thread::spawn(move || {
         let mut sys = System::new_all();
@@ -59,7 +60,7 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>) {
                 state_guard.system.swap_used_gb = swap_used;
                 state_guard.system.swap_total_gb = swap_total;
 
-                if let Some(temp) = temp::poll_temp(&components) {
+                if let Some(temp) = temp_monitor.poll(&components) {
                     state_guard.system.cpu_temp_c = Some(temp);
                 }
 

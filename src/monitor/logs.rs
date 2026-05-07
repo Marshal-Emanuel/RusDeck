@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 pub struct LogLine {
     pub timestamp: String,
@@ -10,6 +11,8 @@ pub struct LogLine {
 pub struct LogBuffer {
     lines: VecDeque<LogLine>,
     max_cap: usize,
+    last_fetch: Instant,
+    fetch_interval_secs: u64,
 }
 
 impl LogBuffer {
@@ -17,10 +20,18 @@ impl LogBuffer {
         Self {
             lines: VecDeque::with_capacity(max_cap),
             max_cap,
+            last_fetch: Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now),
+            fetch_interval_secs: 5,
         }
     }
 
     pub fn poll(&mut self) {
+        let now = Instant::now();
+        if now.duration_since(self.last_fetch).as_secs() < self.fetch_interval_secs {
+            return;
+        }
+        self.last_fetch = now;
+
         let output = Self::fetch_journal().or_else(Self::fetch_syslog);
 
         if let Some(lines) = output {
@@ -47,7 +58,7 @@ impl LogBuffer {
 
     fn fetch_journal() -> Option<Vec<(String, String)>> {
         let output = Command::new("journalctl")
-            .args(["-n", "50", "--no-pager", "-o", "short-iso"])
+            .args(["-n", "50", "--no-pager", "-o", "short-iso", "--since=-5minutes"])
             .output()
             .ok()?;
 
