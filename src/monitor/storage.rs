@@ -3,7 +3,7 @@ use std::process::Command;
 use std::time::Instant;
 
 static mut LAST_DF_CALL: Option<Instant> = None;
-static DF_INTERVAL_SECS: u64 = 10;
+const DF_INTERVAL_SECS: u64 = 10;
 
 pub fn poll_storage(disks: &Disks) -> (f32, f32) {
     let mut total_gb = 0.0;

@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
-use std::process::Command;
-use std::time::{Duration, Instant};
+use std::fs;
+use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::path::PathBuf;
 
 pub struct LogLine {
     pub timestamp: String,
@@ -11,88 +12,123 @@ pub struct LogLine {
 pub struct LogBuffer {
     lines: VecDeque<LogLine>,
     max_cap: usize,
-    last_fetch: Instant,
-    fetch_interval_secs: u64,
+    file_path: PathBuf,
+    last_pos: u64,
+    last_len: u64,
 }
 
 impl LogBuffer {
     pub fn new(max_cap: usize) -> Self {
+        let path = Self::find_syslog_path().unwrap_or_else(|| PathBuf::from("/var/log/syslog"));
         Self {
             lines: VecDeque::with_capacity(max_cap),
             max_cap,
-            last_fetch: Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now),
-            fetch_interval_secs: 5,
+            file_path: path,
+            last_pos: 0,
+            last_len: 0,
         }
     }
 
-    pub fn poll(&mut self) {
-        let now = Instant::now();
-        if now.duration_since(self.last_fetch).as_secs() < self.fetch_interval_secs {
-            return;
+    fn find_syslog_path() -> Option<PathBuf> {
+        let candidates = [
+            "/var/log/syslog",
+            "/var/log/messages",
+            "/var/log/user.log",
+            "/run/log/syslog",
+        ];
+        for path in &candidates {
+            if fs::metadata(path).is_ok() {
+                return Some(PathBuf::from(*path));
+            }
         }
-        self.last_fetch = now;
+        None
+    }
 
-        let output = Self::fetch_journal().or_else(Self::fetch_syslog);
-
-        if let Some(lines) = output {
-            let total = lines.len();
-            for (i, line) in lines.into_iter().enumerate() {
-                let age = if total > 0 { i as f32 / total as f32 } else { 0.0 };
-
+    pub fn poll(&mut self) {
+        let result = self.read_new_lines();
+        if let Some(new_lines) = result {
+            for line in new_lines {
                 if self.lines.len() >= self.max_cap {
                     self.lines.pop_back();
                 }
-
-                self.lines.push_front(LogLine {
-                    timestamp: line.0,
-                    message: line.1,
-                    age,
-                });
+                self.lines.push_front(line);
             }
+        }
+    }
+
+fn read_new_lines(&mut self) -> Option<Vec<LogLine>> {
+        let metadata = match fs::metadata(&self.file_path) {
+            Ok(m) => m,
+            Err(_) => return None,
+        };
+
+        let file_len = metadata.len();
+
+        if file_len < self.last_len {
+            self.last_pos = 0;
+            self.last_len = file_len;
+        }
+
+        if file_len == self.last_pos {
+            return None;
+        }
+
+        let file = match fs::OpenOptions::new().read(true).open(&self.file_path) {
+            Ok(f) => f,
+            Err(_) => return None,
+        };
+
+        let mut reader = BufReader::new(file);
+        if self.last_pos > 0 {
+            if reader.seek(SeekFrom::Start(self.last_pos)).is_err() {
+                return None;
+            }
+        }
+
+        let mut buf = String::new();
+        let bytes_read = reader.read_to_string(&mut buf).ok()?;
+
+        let new_pos = self.last_pos + bytes_read as u64;
+        self.last_pos = new_pos;
+        self.last_len = file_len;
+
+        if buf.is_empty() {
+            return None;
+        }
+
+        let lines: Vec<LogLine> = buf
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| {
+                let (ts, msg) = Self::parse_line(line);
+                LogLine { timestamp: ts, message: msg, age: 0.0 }
+            })
+            .collect();
+
+        if lines.is_empty() {
+            return None;
+        }
+
+        let total = lines.len();
+        let mut result = Vec::with_capacity(total);
+        for (i, mut line) in lines.into_iter().enumerate() {
+            line.age = i as f32 / total as f32;
+            result.push(line);
+        }
+
+        Some(result)
+    }
+
+    fn parse_line(line: &str) -> (String, String) {
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        if parts.len() >= 2 {
+            (parts[0].to_string(), parts[1].to_string())
+        } else {
+            (String::new(), line.to_string())
         }
     }
 
     pub fn get_recent(&self, count: usize) -> Vec<&LogLine> {
         self.lines.iter().take(count).collect()
-    }
-
-    fn fetch_journal() -> Option<Vec<(String, String)>> {
-        let output = Command::new("journalctl")
-            .args(["-n", "50", "--no-pager", "-o", "short-iso", "--since=-5minutes"])
-            .output()
-            .ok()?;
-
-        if !output.status.success() {
-            return None;
-        }
-
-        Some(Self::parse_lines(String::from_utf8_lossy(&output.stdout)))
-    }
-
-    fn fetch_syslog() -> Option<Vec<(String, String)>> {
-        let output = Command::new("tail")
-            .args(["-n", "50", "/var/log/syslog"])
-            .output()
-            .ok()?;
-
-        if !output.status.success() {
-            return None;
-        }
-
-        Some(Self::parse_lines(String::from_utf8_lossy(&output.stdout)))
-    }
-
-    fn parse_lines(content: std::borrow::Cow<str>) -> Vec<(String, String)> {
-        content
-            .lines()
-            .filter_map(|line| {
-                let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                if parts.len() >= 2 {
-                    Some((parts[0].to_string(), parts[1].to_string()))
-                } else {
-                    None
-                }
-            })
-            .collect()
     }
 }
