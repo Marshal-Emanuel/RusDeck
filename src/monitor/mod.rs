@@ -8,12 +8,12 @@ pub mod temp;
 
 use std::thread;
 use std::time::Duration;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, mpsc::Sender};
 use sysinfo::{System, Networks, CpuRefreshKind, Disks, Components};
 
 use crate::app::{AppState, HISTORY_MAX, ProcessInfo, LogLine};
 
-pub fn start_monitor_thread(state: Arc<RwLock<AppState>>) {
+pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>) {
     let mut log_buffer = logs::LogBuffer::new(200);
     let mut temp_monitor = temp::TempMonitor::new();
 
@@ -108,6 +108,8 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>) {
                     });
                 }
             }
+
+            let _ = repaint_tx.send(());
 
             thread::sleep(Duration::from_millis(1000));
         }

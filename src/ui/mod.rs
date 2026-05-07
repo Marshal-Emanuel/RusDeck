@@ -27,9 +27,7 @@ pub fn setup_visuals(ctx: &egui::Context) {
 }
 
 pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme) {
-    ctx.request_repaint();
-
-egui::Area::new("root".into())
+    egui::Area::new("root".into())
         .fixed_pos(Pos2::new(0.0, 0.0))
         .show(ctx, |ui| {
             let avail = ui.available_rect_before_wrap();

@@ -9,10 +9,12 @@ use theme::Theme;
 
 fn main() -> eframe::Result<()> {
     let state = Arc::new(RwLock::new(AppState::new()));
+    let (repaint_request_tx, repaint_request_rx) = std::sync::mpsc::channel::<()>();
 
     let state_monitor = Arc::clone(&state);
+    let tx = repaint_request_tx;
     std::thread::spawn(move || {
-        monitor::start_monitor_thread(state_monitor);
+        monitor::start_monitor_thread(state_monitor, tx);
     });
 
     eframe::run_native(
@@ -28,6 +30,7 @@ fn main() -> eframe::Result<()> {
             Box::new(RusDeckApp {
                 state,
                 theme: Theme::default_white(),
+                repaint_request_rx,
             })
         }),
     )
@@ -36,10 +39,15 @@ fn main() -> eframe::Result<()> {
 struct RusDeckApp {
     state: Arc<RwLock<AppState>>,
     theme: Theme,
+    repaint_request_rx: std::sync::mpsc::Receiver<()>,
 }
 
 impl eframe::App for RusDeckApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        while let Ok(_) = self.repaint_request_rx.try_recv() {
+            ctx.request_repaint();
+        }
+
         let state = self.state.read().unwrap();
         ui::draw(ctx, &state, &self.theme);
     }
