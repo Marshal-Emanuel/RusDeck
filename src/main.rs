@@ -4,7 +4,6 @@ mod theme;
 mod ui;
 
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
 use app::AppState;
 use theme::Theme;
 use ui::background::BackgroundCache;
@@ -34,7 +33,6 @@ fn main() -> eframe::Result<()> {
                 theme: Theme::default_white(),
                 repaint_request_rx,
                 bg_cache: BackgroundCache::new(),
-                last_frame: Instant::now(),
             })
         }),
     )
@@ -45,7 +43,6 @@ struct RusDeckApp {
     theme: Theme,
     repaint_request_rx: std::sync::mpsc::Receiver<()>,
     bg_cache: BackgroundCache,
-    last_frame: Instant,
 }
 
 impl eframe::App for RusDeckApp {
@@ -55,16 +52,12 @@ impl eframe::App for RusDeckApp {
             return;
         }
 
-        let now = Instant::now();
-        if now.duration_since(self.last_frame) >= std::time::Duration::from_millis(100) {
-            self.last_frame = now;
-
-            let _ = self.repaint_request_rx.try_recv();
-
+        {
             let state = self.state.read().unwrap();
             ui::draw(ctx, &state, &self.theme, &mut self.bg_cache);
         }
 
+        let _ = self.repaint_request_rx.try_recv();
         ctx.request_repaint();
     }
 }

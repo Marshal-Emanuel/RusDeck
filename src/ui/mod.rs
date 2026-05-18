@@ -27,7 +27,7 @@ pub fn setup_visuals(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, _bg_cache: &mut BackgroundCache) {
+pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache) {
     egui::Area::new("root".into())
         .fixed_pos(Pos2::new(0.0, 0.0))
         .show(ctx, |ui| {
@@ -36,7 +36,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, _bg_cache: &mu
             let screen_h = avail.height().max(600.0);
             let painter = ui.painter_at(avail);
 
-            background::draw_background(&painter, Rect::from_min_size(Pos2::ZERO, egui::vec2(screen_w, screen_h)), theme);
+            background::draw_background(&painter, Rect::from_min_size(Pos2::ZERO, egui::vec2(screen_w, screen_h)), theme, bg_cache);
 
             let layout = Layout::new(screen_w, screen_h);
 
