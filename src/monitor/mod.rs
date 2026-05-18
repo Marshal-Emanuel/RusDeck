@@ -67,6 +67,7 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>
                 last_temp = now;
             }
             if now.duration_since(last_processes) >= Duration::from_secs(REFRESH_PROCESSES) {
+                sys.refresh_processes();
                 last_processes = now;
             }
             if now.duration_since(last_logs) >= Duration::from_secs(REFRESH_LOGS) {
