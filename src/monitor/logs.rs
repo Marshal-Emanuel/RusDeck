@@ -10,7 +10,6 @@ pub struct LogLine {
 pub struct LogBuffer {
     lines: VecDeque<LogLine>,
     max_cap: usize,
-    last_ts: String,
 }
 
 impl LogBuffer {
@@ -18,7 +17,6 @@ impl LogBuffer {
         Self {
             lines: VecDeque::with_capacity(max_cap),
             max_cap,
-            last_ts: String::new(),
         }
     }
 
@@ -27,15 +25,12 @@ impl LogBuffer {
             .or_else(|| Self::read_syslog_file())
         else { return };
 
+        self.lines.clear();
         for line in new_lines.into_iter().rev() {
-            if line.timestamp <= self.last_ts {
-                continue;
-            }
             if self.lines.len() >= self.max_cap {
-                self.lines.pop_back();
+                break;
             }
-            self.lines.push_front(line.clone());
-            self.last_ts = line.timestamp;
+            self.lines.push_front(line);
         }
     }
 
