@@ -79,6 +79,14 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>
             let cpu_freq = sys.cpus().first().map(|c| c.frequency() as f32 / 1000.0).unwrap_or(0.0);
             let load = System::load_average();
 
+            let (used, total, swap_used, swap_total) = memory::poll_memory(&sys);
+            let cpu_temp = temp_monitor.poll(&components);
+            let (disk_used, disk_total) = storage::poll_storage(&disks);
+            let (iface, mac, rx, tx) = network::poll_network(&mut networks);
+            let process_list = processes::poll_processes(&sys, 12);
+            let recent_logs = log_buffer.get_recent(200);
+            let rx_delta = if prev_rx > 0.0 { Some((rx - prev_rx, tx - prev_tx)) } else { None };
+
             {
                 let mut state_guard = state.write().unwrap();
 
@@ -95,29 +103,26 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>
                     state_guard.load_history.pop_front();
                 }
 
-                let (used, total, swap_used, swap_total) = memory::poll_memory(&sys);
                 state_guard.system.mem_used_gb = used;
                 state_guard.system.mem_total_gb = total;
                 state_guard.system.swap_used_gb = swap_used;
                 state_guard.system.swap_total_gb = swap_total;
 
-                if let Some(temp) = temp_monitor.poll(&components) {
+                if let Some(temp) = cpu_temp {
                     state_guard.system.cpu_temp_c = Some(temp);
                 }
 
-                let (disk_used, disk_total) = storage::poll_storage(&disks);
                 state_guard.system.storage_used_gb = disk_used;
                 state_guard.system.storage_total_gb = disk_total;
 
-                let (iface, mac, rx, tx) = network::poll_network(&mut networks);
                 state_guard.network.interface = iface;
                 state_guard.network.mac = mac;
                 state_guard.network.rx_rate = rx;
                 state_guard.network.tx_rate = tx;
 
-                if prev_rx > 0.0 {
-                    state_guard.network.rx_history.push_back(rx - prev_rx);
-                    state_guard.network.tx_history.push_back(tx - prev_tx);
+                if let Some((rx_diff, tx_diff)) = rx_delta {
+                    state_guard.network.rx_history.push_back(rx_diff);
+                    state_guard.network.tx_history.push_back(tx_diff);
                     if state_guard.network.rx_history.len() > HISTORY_MAX {
                         state_guard.network.rx_history.pop_front();
                     }
@@ -128,18 +133,16 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>
                 prev_rx = rx;
                 prev_tx = tx;
 
-                let process_list = processes::poll_processes(&sys, 12);
                 state_guard.processes.clear();
-                for p in process_list {
+                for p in &process_list {
                     state_guard.processes.push(ProcessInfo {
                         pid: p.pid,
-                        name: p.name,
+                        name: p.name.clone(),
                         cpu_pct: p.cpu_pct,
                         mem_pct: p.mem_pct,
                     });
                 }
 
-                let recent_logs = log_buffer.get_recent(200);
                 state_guard.logs.clear();
                 for log in recent_logs {
                     state_guard.logs.push_back(LogLine {
