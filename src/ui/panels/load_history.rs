@@ -14,20 +14,20 @@ pub fn draw_load_history(painter: &Painter, rect: Rect, state: &AppState, theme:
         Pos2::new(rect.left() + chamfer + 4.0, rect.top() + 25.0),
         Align2::LEFT_TOP,
         "LOAD AVG",
-        FontId::monospace(8.0),
+        FontId::monospace(14.0),
         theme.low(),
     );
     painter.text(
         Pos2::new(value_x, rect.top() + 25.0),
         Align2::RIGHT_TOP,
         format!("{:.2}", current),
-        FontId::monospace(11.0),
+        FontId::monospace(18.0),
         theme.full(),
     );
 
     if !state.load_history.is_empty() {
         let graph_rect = Rect::from_min_max(
-            Pos2::new(rect.left() + chamfer, rect.top() + 50.0),
+            Pos2::new(rect.left() + chamfer, rect.top() + 70.0),
             Pos2::new(rect.right() - chamfer, rect.bottom() - chamfer),
         );
 
@@ -54,7 +54,7 @@ pub fn draw_load_history(painter: &Painter, rect: Rect, state: &AppState, theme:
                 Pos2::new(graph_rect.right(), peak_line_y + 1.0),
                 Align2::RIGHT_TOP,
                 format!("{:.1}", max_val),
-                FontId::monospace(7.0),
+                FontId::monospace(13.0),
                 theme.dimmed(),
             );
         }

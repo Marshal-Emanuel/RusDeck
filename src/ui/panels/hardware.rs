@@ -13,27 +13,27 @@ pub fn draw_hardware(painter: &Painter, rect: Rect, state: &AppState, theme: &Th
     let value_x = rect.right() - 50.0;
     let bar_max_width = rect.width() - 70.0;
 
-    let mut y = rect.top() + 25.0;
-    let line_h = 18.0;
+    let mut y = rect.top() + 40.0;
+    let line_h = 30.0;
 
     // CPU
     painter.text(
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         "CPU",
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.low(),
     );
     let cpu_pct = state.system.cpu_usage / 100.0;
-    draw_parallelogram_bar(painter, Pos2::new(label_x, y + 10.0), bar_max_width * cpu_pct, theme.full());
+    draw_parallelogram_bar(painter, Pos2::new(label_x, y + 16.0), bar_max_width * cpu_pct, theme.full());
     painter.text(
         Pos2::new(value_x, y),
         Align2::RIGHT_TOP,
         format!("{:>5.1}%", state.system.cpu_usage),
-        FontId::monospace(10.0),
+        FontId::monospace(16.0),
         theme.full(),
     );
-    y += line_h + 10.0;
+    y += line_h + 16.0;
 
     // CPU freq & temp
     let freq_text = format!("{:.2}GHZ", state.system.cpu_freq_ghz);
@@ -41,7 +41,7 @@ pub fn draw_hardware(painter: &Painter, rect: Rect, state: &AppState, theme: &Th
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         freq_text,
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.dimmed(),
     );
     if let Some(temp) = state.system.cpu_temp_c {
@@ -50,7 +50,7 @@ pub fn draw_hardware(painter: &Painter, rect: Rect, state: &AppState, theme: &Th
             Pos2::new(rect.right() - 45.0, y),
             Align2::RIGHT_TOP,
             temp_text,
-            FontId::monospace(9.0),
+            FontId::monospace(15.0),
             theme.dimmed(),
         );
     }
@@ -61,27 +61,27 @@ pub fn draw_hardware(painter: &Painter, rect: Rect, state: &AppState, theme: &Th
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         "MEM",
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.low(),
     );
     let mem_pct = state.system.mem_used_gb / state.system.mem_total_gb;
-    draw_parallelogram_bar(painter, Pos2::new(label_x, y + 10.0), bar_max_width * mem_pct, theme.full());
+    draw_parallelogram_bar(painter, Pos2::new(label_x, y + 16.0), bar_max_width * mem_pct, theme.full());
     let mem_text = format!("{:.1}G/{:.0}G", state.system.mem_used_gb, state.system.mem_total_gb);
     painter.text(
         Pos2::new(value_x, y),
         Align2::RIGHT_TOP,
         mem_text,
-        FontId::monospace(10.0),
+        FontId::monospace(16.0),
         theme.full(),
     );
-    y += line_h + 10.0;
+    y += line_h + 16.0;
 
     // Swap
     painter.text(
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         "SWP",
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.low(),
     );
     let swap_pct = if state.system.swap_total_gb > 0.0 {
@@ -89,16 +89,16 @@ pub fn draw_hardware(painter: &Painter, rect: Rect, state: &AppState, theme: &Th
     } else {
         0.0
     };
-    draw_parallelogram_bar(painter, Pos2::new(label_x, y + 10.0), bar_max_width * swap_pct, theme.dimmed());
+    draw_parallelogram_bar(painter, Pos2::new(label_x, y + 16.0), bar_max_width * swap_pct, theme.dimmed());
     let swap_text = format!("{:.1}G/{:.0}G", state.system.swap_used_gb, state.system.swap_total_gb);
     painter.text(
         Pos2::new(value_x, y),
         Align2::RIGHT_TOP,
         swap_text,
-        FontId::monospace(10.0),
+        FontId::monospace(16.0),
         theme.dimmed(),
     );
-    y += line_h + 15.0;
+    y += line_h + 24.0;
 
     // CPU waveform history
     if !state.cpu_history.is_empty() {

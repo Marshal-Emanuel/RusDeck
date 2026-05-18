@@ -14,14 +14,14 @@ pub fn draw_processes(painter: &Painter, rect: Rect, state: &AppState, theme: &T
 
     let bar_max_width = col_mem - col_cpu - 24.0;
 
-    let mut y = rect.top() + 24.0;
-    let row_h = 17.0;
+    let mut y = rect.top() + 38.0;
+    let row_h = 28.0;
 
-    painter.text(Pos2::new(col_pid, y), Align2::LEFT_TOP, "PID", FontId::monospace(7.0), theme.dimmed());
-    painter.text(Pos2::new(col_name, y), Align2::LEFT_TOP, "NAME", FontId::monospace(7.0), theme.dimmed());
-    painter.text(Pos2::new(col_cpu, y), Align2::LEFT_TOP, "CPU%", FontId::monospace(7.0), theme.dimmed());
-    painter.text(Pos2::new(col_mem, y), Align2::RIGHT_TOP, "MEM%", FontId::monospace(7.0), theme.dimmed());
-    y += 12.0;
+    painter.text(Pos2::new(col_pid, y), Align2::LEFT_TOP, "PID",         FontId::monospace(13.0), theme.dimmed());
+    painter.text(Pos2::new(col_name, y), Align2::LEFT_TOP, "NAME",         FontId::monospace(13.0), theme.dimmed());
+    painter.text(Pos2::new(col_cpu, y), Align2::LEFT_TOP, "CPU%",         FontId::monospace(13.0), theme.dimmed());
+    painter.text(Pos2::new(col_mem, y), Align2::RIGHT_TOP, "MEM%",         FontId::monospace(13.0), theme.dimmed());
+    y += 20.0;
 
     for proc in state.processes.iter().take(8) {
         let name = if proc.name.len() > 10 {
@@ -34,14 +34,14 @@ pub fn draw_processes(painter: &Painter, rect: Rect, state: &AppState, theme: &T
             Pos2::new(col_pid, y),
             Align2::LEFT_TOP,
             format!("{}", proc.pid),
-            FontId::monospace(8.0),
+            FontId::monospace(14.0),
             theme.dimmed(),
         );
         painter.text(
             Pos2::new(col_name, y),
             Align2::LEFT_TOP,
             name,
-            FontId::monospace(8.0),
+            FontId::monospace(14.0),
             theme.low(),
         );
 
@@ -56,21 +56,21 @@ pub fn draw_processes(painter: &Painter, rect: Rect, state: &AppState, theme: &T
         let cpu_bar_w = (proc.cpu_pct / 100.0).min(1.0) * bar_max_width;
         let mem_bar_w = (proc.mem_pct / 100.0).min(1.0) * bar_max_width;
 
-        draw_bar(painter, Pos2::new(col_cpu, y + row_h - 3.0), cpu_bar_w, cpu_color);
-        draw_bar(painter, Pos2::new(col_mem - bar_max_width, y + row_h - 3.0), mem_bar_w, theme.full());
+        draw_bar(painter, Pos2::new(col_cpu, y + row_h - 5.0), cpu_bar_w, cpu_color);
+        draw_bar(painter, Pos2::new(col_mem - bar_max_width, y + row_h - 5.0), mem_bar_w, theme.full());
 
         painter.text(
             Pos2::new(col_cpu, y),
             Align2::LEFT_TOP,
             format!("{:>4.1}", proc.cpu_pct),
-            FontId::monospace(8.0),
+            FontId::monospace(14.0),
             theme.full(),
         );
         painter.text(
             Pos2::new(col_mem, y),
             Align2::RIGHT_TOP,
             format!("{:>4.1}", proc.mem_pct),
-            FontId::monospace(8.0),
+            FontId::monospace(14.0),
             theme.full(),
         );
 

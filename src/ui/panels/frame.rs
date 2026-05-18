@@ -25,10 +25,10 @@ pub fn draw_panel_frame(painter: &Painter, rect: Rect, label: &str, theme: &Them
     painter.add(egui::Shape::closed_line(points, Stroke::new(1.0, theme.mid())));
 
     painter.text(
-        Pos2::new(rect.left() + clip + 4.0, rect.top() + 6.0),
+        Pos2::new(rect.left() + clip + 4.0, rect.top() + 10.0),
         Align2::LEFT_TOP,
         label,
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.low(),
     );
 }

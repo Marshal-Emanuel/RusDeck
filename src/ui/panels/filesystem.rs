@@ -14,8 +14,8 @@ pub fn draw_filesystem(painter: &Painter, rect: Rect, state: &AppState, theme: &
     let bar_max_width = rect.width() - 20.0;
     let bar_x = label_x;
 
-    let mut y = rect.top() + 28.0;
-    let line_h = 20.0;
+    let mut y = rect.top() + 44.0;
+    let line_h = 32.0;
 
     let used = state.system.storage_used_gb;
     let total = state.system.storage_total_gb;
@@ -25,17 +25,17 @@ pub fn draw_filesystem(painter: &Painter, rect: Rect, state: &AppState, theme: &
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         "ROOT",
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.low(),
     );
     painter.text(
         Pos2::new(value_x, y),
         Align2::RIGHT_TOP,
         format!("{:.0}G/{:.0}G", used, total),
-        FontId::monospace(10.0),
+        FontId::monospace(16.0),
         theme.full(),
     );
-    y += 12.0;
+    y += 20.0;
 
     draw_parallelogram_bar(painter, Pos2::new(bar_x, y), bar_max_width * pct, bar_pct_color(pct, theme));
     y += BAR_HEIGHT + 6.0;
@@ -44,7 +44,7 @@ pub fn draw_filesystem(painter: &Painter, rect: Rect, state: &AppState, theme: &
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         format!("{:.0}% used", pct * 100.0),
-        FontId::monospace(8.0),
+        FontId::monospace(14.0),
         theme.dimmed(),
     );
     y += line_h + 6.0;
@@ -54,7 +54,7 @@ pub fn draw_filesystem(painter: &Painter, rect: Rect, state: &AppState, theme: &
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         format!("{:.0}G free", free),
-        FontId::monospace(8.0),
+        FontId::monospace(14.0),
         theme.dimmed(),
     );
 }

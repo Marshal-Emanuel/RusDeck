@@ -1,8 +1,7 @@
 use std::collections::VecDeque;
-use std::fs;
-use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::process::Command;
 
+#[derive(Clone)]
 pub struct LogLine {
     pub timestamp: String,
     pub message: String,
@@ -11,113 +10,83 @@ pub struct LogLine {
 pub struct LogBuffer {
     lines: VecDeque<LogLine>,
     max_cap: usize,
-    file_path: PathBuf,
-    last_pos: u64,
-    last_len: u64,
+    last_ts: String,
 }
 
 impl LogBuffer {
     pub fn new(max_cap: usize) -> Self {
-        let path = Self::find_syslog_path().unwrap_or_else(|| PathBuf::from("/var/log/syslog"));
         Self {
             lines: VecDeque::with_capacity(max_cap),
             max_cap,
-            file_path: path,
-            last_pos: 0,
-            last_len: 0,
+            last_ts: String::new(),
         }
     }
 
-    fn find_syslog_path() -> Option<PathBuf> {
+    pub fn poll(&mut self) {
+        let Some(new_lines) = Self::read_journalctl()
+            .or_else(|| Self::read_syslog_file())
+        else { return };
+
+        for line in new_lines.into_iter().rev() {
+            if line.timestamp <= self.last_ts {
+                continue;
+            }
+            if self.lines.len() >= self.max_cap {
+                self.lines.pop_back();
+            }
+            self.lines.push_front(line.clone());
+            self.last_ts = line.timestamp;
+        }
+    }
+
+    fn read_journalctl() -> Option<Vec<LogLine>> {
+        let output = Command::new("journalctl")
+            .args(["--no-pager", "-n", "50", "-o", "short-iso", "--quiet"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8(output.stdout).ok()?;
+        Some(Self::parse_lines(&text))
+    }
+
+    fn read_syslog_file() -> Option<Vec<LogLine>> {
         let candidates = [
             "/var/log/syslog",
             "/var/log/messages",
             "/var/log/user.log",
-            "/run/log/syslog",
         ];
-        for path in &candidates {
-            if fs::metadata(path).is_ok() {
-                return Some(PathBuf::from(*path));
-            }
-        }
-        None
+        let path = candidates.iter().find(|p| std::path::Path::new(p).exists())?;
+        let content = std::fs::read_to_string(path).ok()?;
+        let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+        let last = if lines.len() > 50 { &lines[lines.len() - 50..] } else { &lines };
+        Some(Self::parse_lines(&last.join("\n")))
     }
 
-    pub fn poll(&mut self) {
-        let result = self.read_new_lines();
-        if let Some(new_lines) = result {
-            for line in new_lines {
-                if self.lines.len() >= self.max_cap {
-                    self.lines.pop_back();
-                }
-                self.lines.push_front(line);
-            }
-        }
-    }
-
-fn read_new_lines(&mut self) -> Option<Vec<LogLine>> {
-        let metadata = match fs::metadata(&self.file_path) {
-            Ok(m) => m,
-            Err(_) => return None,
-        };
-
-        let file_len = metadata.len();
-
-        if file_len < self.last_len {
-            self.last_pos = 0;
-            self.last_len = file_len;
-        }
-
-        if file_len == self.last_pos {
-            return None;
-        }
-
-        let file = match fs::OpenOptions::new().read(true).open(&self.file_path) {
-            Ok(f) => f,
-            Err(_) => return None,
-        };
-
-        let mut reader = BufReader::new(file);
-        if self.last_pos > 0 {
-            if reader.seek(SeekFrom::Start(self.last_pos)).is_err() {
-                return None;
-            }
-        }
-
-        let mut buf = String::new();
-        let bytes_read = reader.read_to_string(&mut buf).ok()?;
-
-        let new_pos = self.last_pos + bytes_read as u64;
-        self.last_pos = new_pos;
-        self.last_len = file_len;
-
-        if buf.is_empty() {
-            return None;
-        }
-
-        let lines: Vec<LogLine> = buf
-            .lines()
-            .filter(|line| !line.is_empty())
+    fn parse_lines(text: &str) -> Vec<LogLine> {
+        text.lines()
+            .filter(|l| !l.is_empty())
+            .filter(|l| !Self::is_noise(l))
             .map(|line| {
-                let (ts, msg) = Self::parse_line(line);
+                let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                let (ts, msg) = if parts.len() >= 2 {
+                    (parts[0].to_string(), parts[1].to_string())
+                } else {
+                    (String::new(), line.to_string())
+                };
                 LogLine { timestamp: ts, message: msg }
             })
-            .collect();
-
-        if lines.is_empty() {
-            return None;
-        }
-
-        Some(lines)
+            .collect()
     }
 
-    fn parse_line(line: &str) -> (String, String) {
-        let parts: Vec<&str> = line.splitn(2, ' ').collect();
-        if parts.len() >= 2 {
-            (parts[0].to_string(), parts[1].to_string())
-        } else {
-            (String::new(), line.to_string())
-        }
+    fn is_noise(line: &str) -> bool {
+        let patterns = [
+            "Can't update stage views actor",
+            "client bug: event processing lagging behind",
+            "meta_window_set_geom",
+        ];
+        patterns.iter().any(|p| line.contains(p))
     }
 
     pub fn get_recent(&self, count: usize) -> Vec<&LogLine> {

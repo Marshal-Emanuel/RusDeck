@@ -13,14 +13,14 @@ pub fn draw_network(painter: &Painter, rect: Rect, state: &AppState, theme: &The
     let value_x = rect.right() - 4.0;
     let bar_max_width = rect.width() - 20.0;
 
-    let mut y = rect.top() + 25.0;
-    let line_h = 16.0;
+    let mut y = rect.top() + 40.0;
+    let line_h = 26.0;
 
     painter.text(
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         &state.network.interface,
-        FontId::monospace(10.0),
+        FontId::monospace(16.0),
         theme.high(),
     );
     y += line_h;
@@ -29,7 +29,7 @@ pub fn draw_network(painter: &Painter, rect: Rect, state: &AppState, theme: &The
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         format!("IP {}", state.network.ip),
-        FontId::monospace(8.0),
+        FontId::monospace(14.0),
         theme.dimmed(),
     );
     y += line_h + 4.0;
@@ -38,17 +38,17 @@ pub fn draw_network(painter: &Painter, rect: Rect, state: &AppState, theme: &The
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         "RX",
-        FontId::monospace(8.0),
+        FontId::monospace(14.0),
         theme.low(),
     );
     painter.text(
         Pos2::new(value_x, y),
         Align2::RIGHT_TOP,
         format_rate(state.network.rx_rate),
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.full(),
     );
-    y += 10.0;
+    y += 16.0;
     draw_parallelogram_bar(painter, Pos2::new(label_x, y), bar_max_width * rate_pct(state.network.rx_rate), theme.full());
     y += line_h;
 
@@ -56,19 +56,19 @@ pub fn draw_network(painter: &Painter, rect: Rect, state: &AppState, theme: &The
         Pos2::new(label_x, y),
         Align2::LEFT_TOP,
         "TX",
-        FontId::monospace(8.0),
+        FontId::monospace(14.0),
         theme.low(),
     );
     painter.text(
         Pos2::new(value_x, y),
         Align2::RIGHT_TOP,
         format_rate(state.network.tx_rate),
-        FontId::monospace(9.0),
+        FontId::monospace(15.0),
         theme.full(),
     );
-    y += 10.0;
+    y += 16.0;
     draw_parallelogram_bar(painter, Pos2::new(label_x, y), bar_max_width * rate_pct(state.network.tx_rate), theme.full());
-    y += line_h + 6.0;
+    y += line_h + 10.0;
 
     if !state.network.rx_history.is_empty() {
         let graph_rect = Rect::from_min_max(
@@ -135,7 +135,7 @@ fn draw_dual_waveform(painter: &Painter, rect: Rect, rx_history: &std::collectio
         Pos2::new(rect.right(), rect.top() - 4.0),
         Align2::RIGHT_BOTTOM,
         format!("\u{2016}RX \u{2014}TX"),
-        FontId::monospace(7.0),
+        FontId::monospace(13.0),
         theme.dimmed(),
     );
 }

@@ -56,14 +56,14 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut
                 Pos2::new(tb.left() + 10.0, tb.center().y),
                 Align2::LEFT_CENTER,
                 "SYS_NODE_01",
-                FontId::monospace(11.0),
+                FontId::monospace(18.0),
                 theme.dimmed(),
             );
             painter.text(
                 Pos2::new(tb.right() - 10.0, tb.center().y),
                 Align2::RIGHT_CENTER,
                 chrono::Local::now().format("%H:%M:%S UTC").to_string(),
-                FontId::monospace(11.0),
+                FontId::monospace(18.0),
                 theme.high(),
             );
         });
