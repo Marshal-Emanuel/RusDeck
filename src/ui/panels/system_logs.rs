@@ -7,7 +7,7 @@ pub fn draw_system_logs(painter: &Painter, rect: Rect, state: &AppState, theme: 
     draw_panel_frame(painter, rect, "SYSTEM_LOGS", theme);
 
     let chamfer = 10.0;
-    let ts_width = 170.0;
+    let ts_width = 200.0;
     let text_x = rect.left() + chamfer + 4.0;
     let msg_x = text_x + ts_width;
     let msg_max_w = rect.right() - chamfer - 4.0 - msg_x;
