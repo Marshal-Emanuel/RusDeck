@@ -25,6 +25,10 @@ impl LogBuffer {
             .or_else(|| Self::read_syslog_file())
         else { return };
 
+        if new_lines.is_empty() {
+            return;
+        }
+
         self.lines.clear();
         for line in new_lines.into_iter().rev() {
             if self.lines.len() >= self.max_cap {
@@ -36,7 +40,7 @@ impl LogBuffer {
 
     fn read_journalctl() -> Option<Vec<LogLine>> {
         let output = Command::new("journalctl")
-            .args(["--no-pager", "-n", "50", "-o", "short-iso", "--quiet"])
+            .args(["--no-pager", "-n", "500", "-o", "short-iso", "--quiet"])
             .output()
             .ok()?;
         if !output.status.success() {
