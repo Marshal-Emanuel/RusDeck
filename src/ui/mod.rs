@@ -14,7 +14,7 @@ use panels::network::draw_network;
 use panels::processes::draw_processes;
 use panels::system_logs::draw_system_logs;
 use panels::terminal::draw_terminal;
-use terminal::{TerminalWidget, TerminalModifiers};
+use terminal::TerminalWidget;
 
 pub fn setup_visuals(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::dark();
@@ -37,10 +37,11 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut
             for c in text.chars() {
                 term.handle_char(c);
             }
-        } else if let egui::Event::Key { key, pressed, .. } = event {
+        } else if let egui::Event::Key { key, pressed, modifiers, .. } = event {
             if *pressed {
                 let key_name = format!("{:?}", key);
-                term.handle_key(&key_name, TerminalModifiers::new());
+                let ctrl = modifiers.ctrl;
+                term.handle_key(&key_name, ctrl);
             }
         }
     }

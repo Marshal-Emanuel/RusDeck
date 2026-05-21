@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
-use std::process::Command;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
+use std::thread;
+
+use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 
 #[derive(Clone, Copy, Default)]
 pub struct Cell {
@@ -12,11 +15,11 @@ pub struct Cell {
 
 #[derive(Clone)]
 pub struct TerminalBuffer {
-    lines: VecDeque<Vec<Cell>>,
-    scrollback: VecDeque<String>,
-    scrollback_lines: usize,
-    width: usize,
-    height: usize,
+    pub lines: VecDeque<Vec<Cell>>,
+    pub width: usize,
+    pub height: usize,
+    cursor_col: usize,
+    cursor_row: usize,
 }
 
 impl TerminalBuffer {
@@ -24,10 +27,10 @@ impl TerminalBuffer {
         let lines = vec![vec![Cell::default(); width]; height];
         Self {
             lines: VecDeque::from(lines),
-            scrollback: VecDeque::new(),
-            scrollback_lines: 500,
             width,
             height,
+            cursor_col: 0,
+            cursor_row: 0,
         }
     }
 
@@ -35,145 +38,175 @@ impl TerminalBuffer {
         self.width = width;
         self.height = height;
         self.lines = VecDeque::from(vec![vec![Cell::default(); width]; height]);
+        self.cursor_col = 0;
+        self.cursor_row = 0;
     }
 
     pub fn width(&self) -> usize { self.width }
     pub fn height(&self) -> usize { self.height }
 
-    pub fn get_cell(&self, col: usize, row: usize) -> Cell {
-        if row < self.lines.len() {
-            if let Some(line) = self.lines.get(row) {
-                if col < line.len() {
-                    return line[col];
+    pub fn cursor(&self) -> (usize, usize) {
+        (self.cursor_col, self.cursor_row)
+    }
+
+    pub fn add_text(&mut self, text: &str) {
+        for c in text.chars() {
+            match c {
+                '\n' | '\r' => {
+                    self.cursor_col = 0;
+                    self.cursor_row += 1;
+                    if self.cursor_row >= self.height {
+                        self.lines.pop_back();
+                        self.lines.push_front(vec![Cell::default(); self.width]);
+                        self.cursor_row = self.height - 1;
+                    }
+                }
+                '\x08' | '\x7f' => {
+                    if self.cursor_col > 0 {
+                        self.cursor_col -= 1;
+                        self.lines[self.cursor_row][self.cursor_col] = Cell::default();
+                    }
+                }
+                _ => {
+                    if self.cursor_col < self.width {
+                        self.lines[self.cursor_row][self.cursor_col] = Cell {
+                            c,
+                            fg: [0, 255, 204],
+                            bg: [0, 0, 0],
+                            bold: false,
+                        };
+                        self.cursor_col += 1;
+                    } else {
+                        self.cursor_col = 0;
+                        self.cursor_row += 1;
+                        if self.cursor_row >= self.height {
+                            self.lines.pop_back();
+                            self.lines.push_front(vec![Cell::default(); self.width]);
+                            self.cursor_row = self.height - 1;
+                        }
+                        self.lines[self.cursor_row][self.cursor_col] = Cell {
+                            c,
+                            fg: [0, 255, 204],
+                            bg: [0, 0, 0],
+                            bold: false,
+                        };
+                        self.cursor_col += 1;
+                    }
                 }
             }
         }
-        Cell::default()
     }
-
-    pub fn get_all_cells(&self) -> Vec<Vec<Cell>> {
-        self.lines.iter().map(|l| l.clone()).collect()
-    }
-
-    pub fn cursor(&self) -> (usize, usize) {
-        (0, 0)
-    }
-
-    pub fn add_line(&mut self, text: &str) {
-        let mut row: Vec<Cell> = Vec::with_capacity(self.width);
-        for c in text.chars() {
-            row.push(Cell {
-                c,
-                fg: [0, 255, 204],
-                bg: [0, 0, 0],
-                bold: false,
-            });
-            if row.len() >= self.width {
-                row.pop();
-            }
-        }
-        while row.len() < self.width {
-            row.push(Cell::default());
-        }
-
-        if self.lines.len() >= self.height {
-            let removed = self.lines.pop_back().unwrap();
-            let line_str: String = removed.iter().map(|c| c.c).collect();
-            if self.scrollback.len() >= self.scrollback_lines {
-                self.scrollback.pop_back();
-            }
-            self.scrollback.push_front(line_str);
-            self.lines.push_front(row);
-        } else {
-            self.lines.push_front(row);
-        }
-    }
-}
-
-pub struct PtyHandler;
-
-impl PtyHandler {
-    pub fn new(_cols: usize, _rows: usize) -> Option<Self> {
-        Some(Self)
-    }
-
-    pub fn write_input(&mut self, _data: &[u8]) {}
 }
 
 pub struct TerminalWidget {
-    buffer: TerminalBuffer,
-    handler: PtyHandler,
+    buffer: Arc<Mutex<TerminalBuffer>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    _reader: thread::JoinHandle<()>,
 }
 
 impl TerminalWidget {
     pub fn new(cols: usize, rows: usize) -> Option<Self> {
+        let pty_system = NativePtySystem::default();
+        let pair = pty_system.openpty(PtySize {
+            rows: rows as u16,
+            cols: cols as u16,
+            pixel_width: 0,
+            pixel_height: 0,
+        }).ok()?;
+
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.arg("-i");
+        let child = pair.slave.spawn_command(cmd).ok()?;
+
+        let buffer = Arc::new(Mutex::new(TerminalBuffer::new(cols, rows)));
+        let buffer_clone = Arc::clone(&buffer);
+        let mut reader = pair.master.try_clone_reader().ok()?;
+        let writer: Box<dyn Write + Send> = pair.master.take_writer().ok()?;
+        let writer = Arc::new(Mutex::new(writer));
+
+        let _reader = thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                        if let Ok(mut b) = buffer_clone.lock() {
+                            b.add_text(&text);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        drop(child);
+
         Some(Self {
-            buffer: TerminalBuffer::new(cols, rows),
-            handler: PtyHandler::new(cols, rows)?,
+            buffer,
+            writer,
+            _reader,
         })
     }
 
     pub fn get_buffer(&self) -> Arc<Mutex<TerminalBuffer>> {
-        Arc::new(Mutex::new(self.buffer.clone()))
+        Arc::clone(&self.buffer)
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        self.buffer.resize(cols, rows);
-    }
-
-    pub fn write_input(&mut self, _data: &[u8]) {
-        self.handler.write_input(_data);
-    }
-
-    pub fn handle_key(&mut self, key: &str, _mods: TerminalModifiers) {
-        if key == "Enter" {
-            self.buffer.add_line("$ ");
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.resize(cols, rows);
         }
+    }
+
+    pub fn write_input(&mut self, data: &[u8]) {
+        if let Ok(mut w) = self.writer.lock() {
+            let _ = w.write_all(data);
+            let _ = w.flush();
+        }
+    }
+
+    pub fn handle_key(&mut self, key: &str, ctrl: bool) {
+        let bytes: &[u8] = match key {
+            "Enter" => b"\r",
+            "Backspace" => b"\x7f",
+            "Tab" => b"\t",
+            "Escape" => b"\x1b",
+            "ArrowUp" => b"\x1b[A",
+            "ArrowDown" => b"\x1b[B",
+            "ArrowRight" => b"\x1b[C",
+            "ArrowLeft" => b"\x1b[D",
+            "Home" => b"\x1b[H",
+            "End" => b"\x1b[F",
+            "PageUp" => b"\x1b[5~",
+            "PageDown" => b"\x1b[6~",
+            "Delete" => b"\x1b[3~",
+            "F1" => b"\x1bOP",
+            "F2" => b"\x1bOQ",
+            "F3" => b"\x1bOR",
+            "F4" => b"\x1bOS",
+            "F5" => b"\x1b[15~",
+            "F6" => b"\x1b[17~",
+            "F7" => b"\x1b[18~",
+            "F8" => b"\x1b[19~",
+            "F9" => b"\x1b[20~",
+            "F10" => b"\x1b[21~",
+            "F11" => b"\x1b[23~",
+            "F12" => b"\x1b[24~",
+            "c" if ctrl => b"\x03",
+            "d" if ctrl => b"\x04",
+            "z" if ctrl => b"\x1a",
+            "l" if ctrl => b"\x0c",
+            "u" if ctrl => b"\x15",
+            "k" if ctrl => b"\x0b",
+            _ => return,
+        };
+        self.write_input(bytes);
     }
 
     pub fn handle_char(&mut self, c: char) {
-        self.buffer.add_line(&c.to_string());
-    }
-
-    pub fn execute_command(&mut self, cmd: &str) {
-        let output = Command::new("bash")
-            .args(["-c", cmd])
-            .output();
-
-        if let Ok(out) = output {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-
-            for line in stdout.lines() {
-                self.buffer.add_line(line);
-            }
-            for line in stderr.lines() {
-                self.buffer.add_line(&format!("err: {}", line));
-            }
-        } else {
-            self.buffer.add_line("Failed to execute command");
-        }
-    }
-}
-
-impl Clone for TerminalWidget {
-    fn clone(&self) -> Self {
-        Self {
-            buffer: self.buffer.clone(),
-            handler: PtyHandler::new(self.buffer.width, self.buffer.height).unwrap(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Default)]
-pub struct TerminalModifiers {
-    pub ctrl: bool,
-    pub alt: bool,
-    pub shift: bool,
-}
-
-impl TerminalModifiers {
-    pub fn new() -> Self {
-        Self::default()
+        let mut buf = [0u8; 4];
+        let encoded = c.encode_utf8(&mut buf);
+        self.write_input(encoded.as_bytes());
     }
 }

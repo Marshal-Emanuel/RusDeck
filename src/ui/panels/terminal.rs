@@ -49,7 +49,7 @@ pub fn draw_terminal(painter: &Painter, rect: Rect, term: &TerminalWidget, theme
 
     for row_idx in 0..rows {
         for col_idx in 0..cols {
-            let cell = buf_guard.get_cell(col_idx, row_idx);
+            let cell = buf_guard.lines[row_idx][col_idx];
 
             let x = margin_x + col_idx as f32 * cell_w;
             let y = margin_y + row_idx as f32 * cell_h;
