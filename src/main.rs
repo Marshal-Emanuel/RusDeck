@@ -20,7 +20,8 @@ fn main() -> eframe::Result<()> {
         monitor::start_monitor_thread(state_monitor, tx);
     });
 
-    let terminal = TerminalWidget::new();
+    let terminal = TerminalWidget::new(100, 30)
+        .expect("Failed to create terminal");
 
     eframe::run_native(
         "RusDeck",
@@ -70,7 +71,6 @@ impl eframe::App for RusDeckApp {
         let now = Instant::now();
         if now.duration_since(self.cursor_timer) >= std::time::Duration::from_millis(500) {
             self.cursor_timer = now;
-            self.terminal.toggle_cursor();
             if focused {
                 ctx.request_repaint();
             }

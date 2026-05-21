@@ -1,10 +1,8 @@
-use egui::{Rect, ScrollArea, Frame, Color32, Ui, RichText, Sense, Id};
+use egui::{Rect, Frame, Color32, Ui, RichText, Sense, Id, FontId, Align2, Pos2};
 use crate::theme::Theme;
 use crate::ui::terminal::TerminalWidget;
 
 pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: &Theme) {
-    term.poll_results();
-
     let terminal_id = Id::new("terminal_panel");
     let focused = ui.memory(|m| m.has_focus(terminal_id));
 
@@ -26,7 +24,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                         );
                         ui.separator();
                         ui.label(
-                            RichText::new("bash")
+                            RichText::new("fish")
                                 .monospace()
                                 .size(10.0)
                                 .color(theme.dimmed()),
@@ -35,65 +33,69 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
                     ui.add_space(8.0);
 
-                    ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .stick_to_bottom(true)
-                        .max_height(rect.height() - 50.0)
-                        .show(ui, |ui| {
-                            for entry in &term.history {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new("❯ ")
-                                            .monospace()
-                                            .size(13.0)
-                                            .color(Color32::from_rgb(0, 200, 160)),
-                                    );
-                                    ui.label(
-                                        RichText::new(&entry.command)
-                                            .monospace()
-                                            .size(13.0)
-                                            .color(theme.high()),
-                                    );
-                                });
+                    let buffer = term.get_buffer();
+                    if let Ok(buf_guard) = buffer.lock() {
+                        let cell_w = 8.0;
+                        let cell_h = 16.0;
+                        let painter = ui.painter();
 
-                                if !entry.output.is_empty() {
-                                    ui.add_space(2.0);
-                                    let output_color = if entry.output.starts_with("Error:") {
-                                        Color32::from_rgb(255, 100, 100)
-                                    } else if entry.output == "(running...)" {
-                                        theme.dimmed()
-                                    } else {
-                                        theme.terminal_text
-                                    };
-                                    ui.label(
-                                        RichText::new(&entry.output)
-                                            .monospace()
-                                            .size(12.0)
-                                            .color(output_color),
-                                    );
-                                    ui.add_space(6.0);
+                        for row_idx in 0..buf_guard.height() {
+                            let y = row_idx as f32 * cell_h;
+                            if y + cell_h > rect.height() - 50.0 {
+                                break;
+                            }
+
+                            let mut line_end = 0;
+                            for col_idx in (0..buf_guard.width()).rev() {
+                                if buf_guard.lines[row_idx][col_idx].c != ' ' {
+                                    line_end = col_idx + 1;
+                                    break;
                                 }
                             }
 
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new("❯ ")
-                                        .monospace()
-                                        .size(13.0)
-                                        .color(Color32::from_rgb(0, 200, 160)),
-                                );
+                            for col_idx in 0..line_end {
+                                let cell = buf_guard.lines[row_idx][col_idx];
+                                let x = col_idx as f32 * cell_w;
+                                if x + cell_w > rect.width() - 24.0 {
+                                    break;
+                                }
 
-                                let cursor_char = if term.cursor_visible() { "▌" } else { " " };
-                                let display = format!("{}{}", term.current_input, cursor_char);
+                                if cell.c != ' ' {
+                                    let fg = if cell.bold {
+                                        Color32::from_rgb(
+                                            (cell.fg[0] as u32 + 60).min(255) as u8,
+                                            (cell.fg[1] as u32 + 60).min(255) as u8,
+                                            (cell.fg[2] as u32 + 60).min(255) as u8,
+                                        )
+                                    } else {
+                                        Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
+                                    };
 
-                                ui.label(
-                                    RichText::new(display)
-                                        .monospace()
-                                        .size(13.0)
-                                        .color(theme.high()),
-                                );
-                            });
-                        });
+                                    painter.text(
+                                        Pos2::new(x, y),
+                                        Align2::LEFT_TOP,
+                                        cell.c.to_string(),
+                                        FontId::monospace(12.0),
+                                        fg,
+                                    );
+                                }
+                            }
+                        }
+
+                        let (cursor_col, cursor_row) = buf_guard.cursor();
+                        let cursor_x = cursor_col as f32 * cell_w;
+                        let cursor_y = cursor_row as f32 * cell_h;
+
+                        if cursor_x < rect.width() - 24.0 && cursor_y < rect.height() - 50.0 {
+                            painter.text(
+                                Pos2::new(cursor_x, cursor_y),
+                                Align2::LEFT_TOP,
+                                "▌",
+                                FontId::monospace(12.0),
+                                Color32::from_rgb(0, 200, 160),
+                            );
+                        }
+                    }
                 });
             });
 
@@ -104,12 +106,32 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
         if focused {
             if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                term.execute();
+                term.handle_key("Enter", false);
                 ui.ctx().request_repaint();
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::Backspace)) {
-                term.backspace();
+                term.handle_key("Backspace", false);
+                ui.ctx().request_repaint();
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                term.handle_key("ArrowUp", false);
+                ui.ctx().request_repaint();
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                term.handle_key("ArrowDown", false);
+                ui.ctx().request_repaint();
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                term.handle_key("ArrowLeft", false);
+                ui.ctx().request_repaint();
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                term.handle_key("ArrowRight", false);
                 ui.ctx().request_repaint();
             }
 
@@ -117,7 +139,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                 if let egui::Event::Text(t) = e { Some(t.clone()) } else { None }
             })) {
                 for c in text.chars() {
-                    term.append_char(c);
+                    term.handle_char(c);
                 }
                 ui.ctx().request_repaint();
             }
