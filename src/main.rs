@@ -4,6 +4,7 @@ mod theme;
 mod ui;
 
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 use app::AppState;
 use theme::Theme;
 use ui::background::BackgroundCache;
@@ -37,6 +38,7 @@ fn main() -> eframe::Result<()> {
                 repaint_request_rx,
                 bg_cache: BackgroundCache::new(),
                 terminal,
+                cursor_timer: Instant::now(),
             })
         }),
     )
@@ -48,6 +50,7 @@ struct RusDeckApp {
     repaint_request_rx: std::sync::mpsc::Receiver<()>,
     bg_cache: BackgroundCache,
     terminal: TerminalWidget,
+    cursor_timer: Instant,
 }
 
 impl eframe::App for RusDeckApp {
@@ -60,6 +63,13 @@ impl eframe::App for RusDeckApp {
         {
             let state = self.state.read().unwrap();
             ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal);
+        }
+
+        let now = Instant::now();
+        if now.duration_since(self.cursor_timer) >= std::time::Duration::from_millis(500) {
+            self.cursor_timer = now;
+            self.terminal.toggle_cursor();
+            ctx.request_repaint();
         }
 
         if self.repaint_request_rx.try_recv().is_ok() {

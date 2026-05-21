@@ -10,6 +10,7 @@ pub struct CommandEntry {
 pub struct TerminalWidget {
     pub history: VecDeque<CommandEntry>,
     pub current_input: String,
+    cursor_visible: bool,
     max_history: usize,
 }
 
@@ -18,6 +19,7 @@ impl TerminalWidget {
         Self {
             history: VecDeque::with_capacity(50),
             current_input: String::new(),
+            cursor_visible: true,
             max_history: 50,
         }
     }
@@ -59,13 +61,11 @@ impl TerminalWidget {
         }
     }
 
-    pub fn take_input(&mut self) -> Option<String> {
-        if !self.current_input.is_empty() {
-            let cmd = self.current_input.clone();
-            self.current_input.clear();
-            Some(cmd)
-        } else {
-            None
-        }
+    pub fn toggle_cursor(&mut self) {
+        self.cursor_visible = !self.cursor_visible;
+    }
+
+    pub fn cursor_visible(&self) -> bool {
+        self.cursor_visible
     }
 }
