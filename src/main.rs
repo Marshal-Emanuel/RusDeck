@@ -60,16 +60,25 @@ impl eframe::App for RusDeckApp {
             return;
         }
 
-        {
-            let state = self.state.read().unwrap();
-            ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal);
+        let terminal_id = egui::Id::new("terminal_panel");
+        let focused = ctx.memory(|m| m.has_focus(terminal_id));
+
+        if !focused {
+            ctx.memory_mut(|m| m.request_focus(terminal_id));
         }
 
         let now = Instant::now();
         if now.duration_since(self.cursor_timer) >= std::time::Duration::from_millis(500) {
             self.cursor_timer = now;
             self.terminal.toggle_cursor();
-            ctx.request_repaint();
+            if focused {
+                ctx.request_repaint();
+            }
+        }
+
+        {
+            let state = self.state.read().unwrap();
+            ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal);
         }
 
         if self.repaint_request_rx.try_recv().is_ok() {

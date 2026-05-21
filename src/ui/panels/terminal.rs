@@ -3,6 +3,8 @@ use crate::theme::Theme;
 use crate::ui::terminal::TerminalWidget;
 
 pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: &Theme) {
+    term.poll_results();
+
     let terminal_id = Id::new("terminal_panel");
     let focused = ui.memory(|m| m.has_focus(terminal_id));
 
@@ -56,11 +58,18 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
                                 if !entry.output.is_empty() {
                                     ui.add_space(2.0);
+                                    let output_color = if entry.output.starts_with("Error:") {
+                                        Color32::from_rgb(255, 100, 100)
+                                    } else if entry.output == "(running...)" {
+                                        theme.dimmed()
+                                    } else {
+                                        theme.terminal_text
+                                    };
                                     ui.label(
                                         RichText::new(&entry.output)
                                             .monospace()
                                             .size(12.0)
-                                            .color(theme.terminal_text),
+                                            .color(output_color),
                                     );
                                     ui.add_space(6.0);
                                 }

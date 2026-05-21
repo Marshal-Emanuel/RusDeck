@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 use std::process::Command;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
 
 #[derive(Clone)]
 pub struct CommandEntry {
@@ -12,49 +14,40 @@ pub struct TerminalWidget {
     pub current_input: String,
     cursor_visible: bool,
     max_history: usize,
+    tx: Sender<(String, String)>,
+    rx: Receiver<(String, String)>,
+    pending_cmd: Option<String>,
 }
 
 impl TerminalWidget {
     pub fn new() -> Self {
+        let (tx, rx) = channel();
         Self {
             history: VecDeque::with_capacity(50),
             current_input: String::new(),
             cursor_visible: true,
             max_history: 50,
+            tx,
+            rx,
+            pending_cmd: None,
         }
     }
 
     pub fn execute(&mut self) {
-        let trimmed = self.current_input.trim();
+        let trimmed = self.current_input.trim().to_string();
         if trimmed.is_empty() {
             return;
         }
 
-        let output = if trimmed == "clear" {
+        if trimmed == "clear" {
             self.history.clear();
             self.current_input.clear();
             return;
-        } else if trimmed == "help" {
-            "Available: clear, help, top, free, df -h, ps aux, uptime, whoami, hostname, date".to_string()
-        } else {
-            match Command::new("bash").args(["-c", trimmed]).output() {
-                Ok(out) => {
-                    let mut result = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    if !stderr.is_empty() {
-                        if !result.is_empty() { result.push('\n'); }
-                        result.push_str(&stderr);
-                    }
-                    if result.is_empty() { result = "(no output)".to_string(); }
-                    result
-                }
-                Err(e) => format!("Error: {}", e),
-            }
-        };
+        }
 
         self.history.push_back(CommandEntry {
-            command: self.current_input.clone(),
-            output,
+            command: trimmed.clone(),
+            output: "(running...)".to_string(),
         });
 
         if self.history.len() > self.max_history {
@@ -62,6 +55,37 @@ impl TerminalWidget {
         }
 
         self.current_input.clear();
+        self.pending_cmd = Some(trimmed.clone());
+
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = if trimmed == "help" {
+                "Available: clear, help, top, free, df -h, ps aux, uptime, whoami, hostname, date".to_string()
+            } else {
+                match Command::new("bash").args(["-c", &trimmed]).output() {
+                    Ok(out) => {
+                        let mut result = String::from_utf8_lossy(&out.stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                        if !stderr.is_empty() {
+                            if !result.is_empty() { result.push('\n'); }
+                            result.push_str(&stderr);
+                        }
+                        if result.is_empty() { result = "(no output)".to_string(); }
+                        result
+                    }
+                    Err(e) => format!("Error: {}", e),
+                }
+            };
+            let _ = tx.send((trimmed, result));
+        });
+    }
+
+    pub fn poll_results(&mut self) {
+        while let Ok((cmd, output)) = self.rx.try_recv() {
+            if let Some(entry) = self.history.iter_mut().rev().find(|e| e.command == cmd) {
+                entry.output = output;
+            }
+        }
     }
 
     pub fn append_char(&mut self, c: char) {
