@@ -24,14 +24,15 @@ impl TerminalWidget {
         }
     }
 
-    pub fn execute(&mut self, cmd: &str) {
-        let trimmed = cmd.trim();
+    pub fn execute(&mut self) {
+        let trimmed = self.current_input.trim();
         if trimmed.is_empty() {
             return;
         }
 
         let output = if trimmed == "clear" {
             self.history.clear();
+            self.current_input.clear();
             return;
         } else if trimmed == "help" {
             "Available: clear, help, top, free, df -h, ps aux, uptime, whoami, hostname, date".to_string()
@@ -52,13 +53,23 @@ impl TerminalWidget {
         };
 
         self.history.push_back(CommandEntry {
-            command: trimmed.to_string(),
+            command: self.current_input.clone(),
             output,
         });
 
         if self.history.len() > self.max_history {
             self.history.pop_front();
         }
+
+        self.current_input.clear();
+    }
+
+    pub fn append_char(&mut self, c: char) {
+        self.current_input.push(c);
+    }
+
+    pub fn backspace(&mut self) {
+        self.current_input.pop();
     }
 
     pub fn toggle_cursor(&mut self) {

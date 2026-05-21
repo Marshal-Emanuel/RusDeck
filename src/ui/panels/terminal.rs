@@ -1,8 +1,11 @@
-use egui::{Rect, ScrollArea, TextEdit, Frame, Color32, FontId, Ui, RichText};
+use egui::{Rect, ScrollArea, Frame, Color32, Ui, RichText, Sense, Id};
 use crate::theme::Theme;
 use crate::ui::terminal::TerminalWidget;
 
 pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: &Theme) {
+    let terminal_id = Id::new("terminal_panel");
+    let focused = ui.memory(|m| m.has_focus(terminal_id));
+
     ui.allocate_ui_at_rect(rect, |ui| {
         Frame::none()
             .fill(Color32::from_rgba_unmultiplied(6, 10, 8, 255))
@@ -33,7 +36,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                     ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .stick_to_bottom(true)
-                        .max_height(rect.height() - 70.0)
+                        .max_height(rect.height() - 50.0)
                         .show(ui, |ui| {
                             for entry in &term.history {
                                 ui.horizontal(|ui| {
@@ -62,42 +65,53 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                     ui.add_space(6.0);
                                 }
                             }
+
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("❯ ")
+                                        .monospace()
+                                        .size(13.0)
+                                        .color(Color32::from_rgb(0, 200, 160)),
+                                );
+
+                                let cursor_char = if term.cursor_visible() { "▌" } else { " " };
+                                let display = format!("{}{}", term.current_input, cursor_char);
+
+                                ui.label(
+                                    RichText::new(display)
+                                        .monospace()
+                                        .size(13.0)
+                                        .color(theme.high()),
+                                );
+                            });
                         });
-
-                    ui.add_space(6.0);
-
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("❯ ")
-                                .monospace()
-                                .size(13.0)
-                                .color(Color32::from_rgb(0, 200, 160)),
-                        );
-
-                        let _cursor_char = if term.cursor_visible() { "▌" } else { " " };
-
-                        let response = ui.add(
-                            TextEdit::singleline(&mut term.current_input)
-                                .font(FontId::monospace(13.0))
-                                .text_color(theme.terminal_text)
-                                .desired_width(rect.width() - 60.0)
-                                .hint_text("type command...")
-                                .frame(false),
-                        );
-
-                        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            if !term.current_input.is_empty() {
-                                let cmd = term.current_input.clone();
-                                term.current_input.clear();
-                                term.execute(&cmd);
-                            }
-                        }
-
-                        if response.has_focus() {
-                            ui.ctx().request_repaint();
-                        }
-                    });
                 });
             });
+
+        let response = ui.interact(rect, terminal_id, Sense::click());
+        if response.clicked() {
+            ui.memory_mut(|m| m.request_focus(terminal_id));
+        }
+
+        if focused {
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                term.execute();
+                ui.ctx().request_repaint();
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::Backspace)) {
+                term.backspace();
+                ui.ctx().request_repaint();
+            }
+
+            if let Some(text) = ui.input(|i| i.events.iter().find_map(|e| {
+                if let egui::Event::Text(t) = e { Some(t.clone()) } else { None }
+            })) {
+                for c in text.chars() {
+                    term.append_char(c);
+                }
+                ui.ctx().request_repaint();
+            }
+        }
     });
 }
