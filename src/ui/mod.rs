@@ -1,6 +1,7 @@
 pub mod background;
 mod layout;
 pub mod panels;
+pub mod terminal;
 
 use egui::{Color32, Pos2, Vec2, Rect, Align2, FontId};
 use crate::app::AppState;
@@ -9,10 +10,11 @@ use background::BackgroundCache;
 use layout::Layout;
 use panels::filesystem::draw_filesystem;
 use panels::hardware::draw_hardware;
-use panels::load_history::draw_load_history;
 use panels::network::draw_network;
 use panels::processes::draw_processes;
 use panels::system_logs::draw_system_logs;
+use panels::terminal::draw_terminal;
+use terminal::{TerminalWidget, TerminalModifiers};
 
 pub fn setup_visuals(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::dark();
@@ -27,7 +29,22 @@ pub fn setup_visuals(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache) {
+pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache, term: &mut TerminalWidget) {
+    let key_events = ctx.input(|i| i.events.clone());
+
+    for event in &key_events {
+        if let egui::Event::Text(text) = event {
+            for c in text.chars() {
+                term.handle_char(c);
+            }
+        } else if let egui::Event::Key { key, pressed, .. } = event {
+            if *pressed {
+                let key_name = format!("{:?}", key);
+                term.handle_key(&key_name, TerminalModifiers::new());
+            }
+        }
+    }
+
     egui::Area::new("root".into())
         .fixed_pos(Pos2::new(0.0, 0.0))
         .show(ctx, |ui| {
@@ -42,7 +59,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut
 
             draw_hardware(&painter, layout.hardware, state, theme);
             draw_filesystem(&painter, layout.storage, state, theme);
-            draw_load_history(&painter, layout.load_history, state, theme);
+            draw_terminal(&painter, layout.terminal, term, theme);
             draw_network(&painter, layout.network, state, theme);
             draw_processes(&painter, layout.processes, state, theme);
             draw_system_logs(&painter, layout.system_logs, state, theme);

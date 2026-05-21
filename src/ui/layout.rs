@@ -4,7 +4,7 @@ pub struct Layout {
     pub topbar: Rect,
     pub hardware: Rect,
     pub storage: Rect,
-    pub load_history: Rect,
+    pub terminal: Rect,
     pub network: Rect,
     pub processes: Rect,
     pub system_logs: Rect,
@@ -45,7 +45,7 @@ impl Layout {
                 Pos2::new(pad, left_storage_top),
                 Pos2::new(pad + side_w, main_bottom),
             ),
-            load_history: Rect::from_min_max(
+            terminal: Rect::from_min_max(
                 Pos2::new(mid_left, main_top),
                 Pos2::new(mid_right, main_bottom),
             ),
