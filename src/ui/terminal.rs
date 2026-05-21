@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
 #[derive(Clone, Copy, Default)]
 pub struct Cell {
@@ -149,8 +149,8 @@ impl TerminalWidget {
         })
     }
 
-    pub fn get_buffer(&self) -> Arc<Mutex<TerminalBuffer>> {
-        Arc::clone(&self.buffer)
+    pub fn get_buffer(&self) -> &Arc<Mutex<TerminalBuffer>> {
+        &self.buffer
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
