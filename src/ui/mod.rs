@@ -3,7 +3,7 @@ mod layout;
 pub mod panels;
 pub mod terminal;
 
-use egui::{Color32, Pos2, Vec2, Rect, Align2, FontId};
+use egui::{Color32, Pos2, Vec2, Rect, Align2};
 use crate::app::AppState;
 use crate::theme::Theme;
 use background::BackgroundCache;
@@ -26,6 +26,29 @@ pub fn setup_visuals(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
     style.spacing.item_spacing = Vec2::new(0.0, 0.0);
     style.spacing.window_margin = egui::Margin::ZERO;
+
+    let nerd_font = egui::FontData::from_static(include_bytes!(
+        "/home/marshal/.local/share/fonts/Fira Code Regular Nerd Font Complete Windows Compatible.ttf"
+    ));
+    let mut fonts = egui::epaint::text::FontDefinitions::default();
+    fonts.font_data.insert("FiraCodeNF".to_owned(), nerd_font.into());
+    fonts.families.insert(
+        egui::FontFamily::Monospace,
+        vec!["FiraCodeNF".to_owned()],
+    );
+    fonts.families.insert(
+        egui::FontFamily::Proportional,
+        vec!["FiraCodeNF".to_owned()],
+    );
+    style.text_styles = [
+        (egui::TextStyle::Small, egui::FontId::new(10.0, egui::FontFamily::Monospace)),
+        (egui::TextStyle::Body, egui::FontId::new(13.0, egui::FontFamily::Monospace)),
+        (egui::TextStyle::Button, egui::FontId::new(13.0, egui::FontFamily::Monospace)),
+        (egui::TextStyle::Heading, egui::FontId::new(18.0, egui::FontFamily::Monospace)),
+        (egui::TextStyle::Monospace, egui::FontId::new(13.0, egui::FontFamily::Monospace)),
+    ]
+    .into();
+    ctx.set_fonts(fonts);
     ctx.set_style(style);
 }
 
@@ -61,14 +84,14 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut
                 Pos2::new(tb.left() + 10.0, tb.center().y),
                 Align2::LEFT_CENTER,
                 "SYS_NODE_01",
-                FontId::monospace(18.0),
+                egui::FontId::new(18.0, egui::FontFamily::Monospace),
                 theme.dimmed(),
             );
             painter.text(
                 Pos2::new(tb.right() - 10.0, tb.center().y),
                 Align2::RIGHT_CENTER,
                 chrono::Local::now().format("%H:%M:%S UTC").to_string(),
-                FontId::monospace(18.0),
+                egui::FontId::new(18.0, egui::FontFamily::Monospace),
                 theme.high(),
             );
         });

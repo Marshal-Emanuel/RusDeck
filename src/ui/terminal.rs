@@ -3,14 +3,25 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct Cell {
     pub c: char,
     pub fg: [u8; 3],
     pub bg: [u8; 3],
     pub bold: bool,
+}
+
+impl Default for Cell {
+    fn default() -> Self {
+        Self {
+            c: ' ',
+            fg: [207, 221, 225],
+            bg: [0, 0, 0],
+            bold: false,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -134,6 +145,7 @@ impl TerminalBuffer {
 pub struct TerminalWidget {
     buffer: Arc<Mutex<TerminalBuffer>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    _child: Box<dyn Child + Send>,
     _reader: thread::JoinHandle<()>,
 }
 
@@ -173,11 +185,10 @@ impl TerminalWidget {
             }
         });
 
-        drop(child);
-
         Some(Self {
             buffer,
             writer,
+            _child: child,
             _reader,
         })
     }
@@ -248,13 +259,15 @@ struct AnsiParser {
     state: ParserState,
     params: Vec<i64>,
     current_param: String,
+    has_intermediate: bool,
 }
 
 #[derive(Clone, Copy)]
 enum ParserState {
     Normal,
     Escape,
-    Csi,
+    CsiEntry,
+    OscEntry,
 }
 
 impl AnsiParser {
@@ -263,6 +276,7 @@ impl AnsiParser {
             state: ParserState::Normal,
             params: Vec::new(),
             current_param: String::new(),
+            has_intermediate: false,
         }
     }
 
@@ -272,47 +286,74 @@ impl AnsiParser {
                 ParserState::Normal => {
                     match b {
                         0x1b => self.state = ParserState::Escape,
-                        0x0a | 0x0d => buf.newline(),
+                        0x0a => buf.newline(),
+                        0x0d => buf.carriage_return(),
                         0x08 | 0x7f => buf.backspace(),
-                        0x0c => buf.erase_screen(),
+                        0x0c => {
+                            buf.erase_screen();
+                        }
                         _ if b >= 0x20 => buf.put_char(b as char),
                         _ => {}
                     }
                 }
                 ParserState::Escape => {
-                    if b == b'[' {
-                        self.state = ParserState::Csi;
-                        self.params.clear();
-                        self.current_param.clear();
-                    } else {
-                        self.state = ParserState::Normal;
+                    match b {
+                        b'[' => {
+                            self.state = ParserState::CsiEntry;
+                            self.params.clear();
+                            self.current_param.clear();
+                            self.has_intermediate = false;
+                        }
+                        b']' => {
+                            self.state = ParserState::OscEntry;
+                            self.current_param.clear();
+                        }
+                        _ => {
+                            self.state = ParserState::Normal;
+                        }
                     }
                 }
-                ParserState::Csi => {
+                ParserState::CsiEntry => {
                     if b >= b'0' && b <= b'9' {
                         self.current_param.push(b as char);
                     } else if b == b';' {
-                        if let Ok(n) = self.current_param.parse::<i64>() {
-                            self.params.push(n);
-                        } else if !self.current_param.is_empty() {
-                            self.params.push(0);
-                        }
-                        self.current_param.clear();
+                        self.push_param();
+                    } else if b >= 0x20 && b <= 0x2f {
+                        self.has_intermediate = true;
+                    } else if b == b'?' || b == b'>' || b == b'!' || b == b'$' {
+                        // Private mode prefix — skip it
                     } else {
-                        if !self.current_param.is_empty() {
-                            if let Ok(n) = self.current_param.parse::<i64>() {
-                                self.params.push(n);
-                            }
-                        }
+                        self.push_param();
                         self.execute_csi(buf, b);
                         self.state = ParserState::Normal;
+                    }
+                }
+                ParserState::OscEntry => {
+                    if b == 0x07 || b == 0x1b {
+                        // End of OSC sequence — ignore
+                        self.state = ParserState::Normal;
+                    } else {
+                        self.current_param.push(b as char);
                     }
                 }
             }
         }
     }
 
+    fn push_param(&mut self) {
+        if let Ok(n) = self.current_param.parse::<i64>() {
+            self.params.push(n);
+        } else if !self.current_param.is_empty() {
+            self.params.push(0);
+        }
+        self.current_param.clear();
+    }
+
     fn execute_csi(&mut self, buf: &mut TerminalBuffer, final_byte: u8) {
+        if self.has_intermediate {
+            return;
+        }
+
         match final_byte {
             b'm' => self.set_sgr(buf),
             b'A' => {
@@ -331,6 +372,20 @@ impl AnsiParser {
                 let n = self.params.first().copied().unwrap_or(1) as usize;
                 buf.cursor_col = buf.cursor_col.saturating_sub(n);
             }
+            b'E' => {
+                let n = self.params.first().copied().unwrap_or(1) as usize;
+                buf.cursor_row = (buf.cursor_row + n).min(buf.height - 1);
+                buf.cursor_col = 0;
+            }
+            b'F' => {
+                let n = self.params.first().copied().unwrap_or(1) as usize;
+                buf.cursor_row = buf.cursor_row.saturating_sub(n);
+                buf.cursor_col = 0;
+            }
+            b'G' => {
+                let n = self.params.first().copied().unwrap_or(1) as usize;
+                buf.cursor_col = (n - 1).min(buf.width - 1);
+            }
             b'H' | b'f' => {
                 let row = self.params.first().copied().unwrap_or(1) as usize;
                 let col = self.params.get(1).copied().unwrap_or(1) as usize;
@@ -339,12 +394,88 @@ impl AnsiParser {
             }
             b'J' => {
                 match self.params.first().copied().unwrap_or(0) {
-                    0 => buf.erase_screen(),
+                    0 => {
+                        for x in buf.cursor_col..buf.width {
+                            buf.lines[buf.cursor_row][x] = Cell::default();
+                        }
+                        for row in (buf.cursor_row + 1)..buf.height {
+                            for x in 0..buf.width {
+                                buf.lines[row][x] = Cell::default();
+                            }
+                        }
+                    }
+                    1 => {
+                        for x in 0..=buf.cursor_col {
+                            buf.lines[buf.cursor_row][x] = Cell::default();
+                        }
+                        for row in 0..buf.cursor_row {
+                            for x in 0..buf.width {
+                                buf.lines[row][x] = Cell::default();
+                            }
+                        }
+                    }
                     2 => buf.erase_screen(),
+                    3 => buf.erase_screen(),
                     _ => {}
                 }
             }
-            b'K' => buf.erase_line(),
+            b'K' => {
+                match self.params.first().copied().unwrap_or(0) {
+                    0 => {
+                        for x in buf.cursor_col..buf.width {
+                            buf.lines[buf.cursor_row][x] = Cell::default();
+                        }
+                    }
+                    1 => {
+                        for x in 0..=buf.cursor_col {
+                            buf.lines[buf.cursor_row][x] = Cell::default();
+                        }
+                    }
+                    2 => {
+                        for x in 0..buf.width {
+                            buf.lines[buf.cursor_row][x] = Cell::default();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            b'L' => {
+                let n = self.params.first().copied().unwrap_or(1) as usize;
+                for _ in 0..n {
+                    buf.scroll_up();
+                }
+            }
+            b'M' => {
+                let n = self.params.first().copied().unwrap_or(1) as usize;
+                for _ in 0..n {
+                    buf.lines.pop_back();
+                    buf.lines.push_front(vec![Cell::default(); buf.width]);
+                }
+            }
+            b'P' => {
+                let n = self.params.first().copied().unwrap_or(1) as usize;
+                for x in (buf.cursor_col + n)..buf.width {
+                    buf.lines[buf.cursor_row][x - n] = buf.lines[buf.cursor_row][x];
+                }
+                for x in (buf.width - n)..buf.width {
+                    buf.lines[buf.cursor_row][x] = Cell::default();
+                }
+            }
+            b'@' => {
+                let n = self.params.first().copied().unwrap_or(1) as usize;
+                for x in (buf.cursor_col..buf.width - n).rev() {
+                    buf.lines[buf.cursor_row][x + n] = buf.lines[buf.cursor_row][x];
+                }
+                for x in buf.cursor_col..(buf.cursor_col + n).min(buf.width) {
+                    buf.lines[buf.cursor_row][x] = Cell::default();
+                }
+            }
+            b'h' | b'l' | b'r' => {
+                // Set/reset mode, reverse — ignore
+            }
+            b'n' => {
+                // Device status report — ignore
+            }
             _ => {}
         }
     }
@@ -360,6 +491,8 @@ impl AnsiParser {
             match self.params[i] {
                 0 => buf.reset_attrs(),
                 1 => buf.bold = true,
+                2 => buf.bold = false,
+                3 => buf.bold = true,
                 22 => buf.bold = false,
                 30..=37 => {
                     let c = ansi_color(self.params[i] as u8 - 30);
@@ -370,12 +503,31 @@ impl AnsiParser {
                         let c = extended_color(self.params[i + 2] as u8);
                         buf.set_fg(c[0], c[1], c[2]);
                         i += 2;
+                    } else if i + 4 < self.params.len() && self.params[i + 1] == 2 {
+                        let r = self.params[i + 2] as u8;
+                        let g = self.params[i + 3] as u8;
+                        let b = self.params[i + 4] as u8;
+                        buf.set_fg(r, g, b);
+                        i += 4;
                     }
                 }
                 39 => buf.set_fg(207, 221, 225),
                 40..=47 => {
                     let c = ansi_color(self.params[i] as u8 - 40);
                     buf.set_bg(c[0], c[1], c[2]);
+                }
+                48 => {
+                    if i + 2 < self.params.len() && self.params[i + 1] == 5 {
+                        let c = extended_color(self.params[i + 2] as u8);
+                        buf.set_bg(c[0], c[1], c[2]);
+                        i += 2;
+                    } else if i + 4 < self.params.len() && self.params[i + 1] == 2 {
+                        let r = self.params[i + 2] as u8;
+                        let g = self.params[i + 3] as u8;
+                        let b = self.params[i + 4] as u8;
+                        buf.set_bg(r, g, b);
+                        i += 4;
+                    }
                 }
                 49 => buf.set_bg(0, 0, 0),
                 90..=97 => {
