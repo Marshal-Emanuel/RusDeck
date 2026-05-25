@@ -1,10 +1,118 @@
-use egui::{Rect, Frame, Color32, Ui, RichText, Sense, Id, FontId, Align2, Pos2, ScrollArea, Vec2};
+use egui::{Rect, Frame, Color32, Ui, RichText, Sense, Id, Align2, Pos2, ScrollArea, Vec2};
 use crate::theme::Theme;
 use crate::ui::terminal::TerminalWidget;
+use crate::ui::clipboard;
 
-pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: &Theme) {
+#[derive(Clone, Copy, Default)]
+struct Selection {
+    start: Option<usize>,
+    end: Option<usize>,
+}
+
+impl Selection {
+    fn is_empty(&self) -> bool {
+        self.start.is_none() && self.end.is_none()
+    }
+
+    fn rows(&self) -> Option<(usize, usize)> {
+        match (self.start, self.end) {
+            (Some(s), Some(e)) if s <= e => Some((s, e)),
+            (Some(s), Some(e)) => Some((e, s)),
+            (Some(s), None) => Some((s, s)),
+            (None, Some(e)) => Some((e, e)),
+            _ => None,
+        }
+    }
+}
+
+pub struct TerminalPanel {
+    selection: Selection,
+    show_copied_toast: bool,
+    toast_timer: f32,
+}
+
+impl Default for TerminalPanel {
+    fn default() -> Self {
+        Self {
+            selection: Selection::default(),
+            show_copied_toast: false,
+            toast_timer: 0.0,
+        }
+    }
+}
+
+impl TerminalPanel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn get_selected_text(&self, buf: &crate::ui::terminal::TerminalBuffer) -> String {
+        match self.selection.rows() {
+            Some((start, end)) => {
+                (start..=end)
+                    .filter_map(|i| buf.lines.get(i))
+                    .map(|row| {
+                        row.iter()
+                            .map(|cell| cell.c)
+                            .collect::<String>()
+                            .trim_end()
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            None => {
+                buf.lines
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|cell| cell.c)
+                            .collect::<String>()
+                            .trim_end()
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        }
+    }
+
+    fn handle_copy(&mut self, term: &TerminalWidget) {
+        let buffer = term.get_buffer();
+        if let Ok(buf) = buffer.lock() {
+            let text = self.get_selected_text(&buf);
+            clipboard::copy_to_clipboard(&text);
+            self.show_copied_toast = true;
+            self.toast_timer = 1.5;
+            self.selection = Selection::default();
+        }
+    }
+
+    fn clear_selection(&mut self) {
+        self.selection = Selection::default();
+    }
+
+    fn update_toast(&mut self, dt: f32) {
+        if self.show_copied_toast {
+            self.toast_timer -= dt;
+            if self.toast_timer <= 0.0 {
+                self.show_copied_toast = false;
+            }
+        }
+    }
+}
+
+pub fn draw_terminal(
+    ui: &mut Ui,
+    rect: Rect,
+    term: &mut TerminalWidget,
+    theme: &Theme,
+    panel: &mut TerminalPanel,
+) {
     let terminal_id = Id::new("terminal_panel");
     let focused = ui.memory(|m| m.has_focus(terminal_id));
+
+    panel.update_toast(ui.input(|i| i.unstable_dt));
 
     ui.allocate_ui_at_rect(rect, |ui| {
         Frame::none()
@@ -39,87 +147,135 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                         let content_h = buf_guard.height() as f32 * cell_h;
                         let content_w = buf_guard.width() as f32 * cell_w;
 
-                        ScrollArea::vertical()
-                            .auto_shrink(false)
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                let desired_size = Vec2::new(content_w.min(ui.available_width()), content_h);
-                                let (response, painter) = ui.allocate_painter(desired_size, Sense::hover());
+                        let available_h = ui.available_height();
+                        let visible_rows = ((available_h / cell_h) as usize).min(buf_guard.height());
+                        let visible_h = visible_rows as f32 * cell_h;
+                        let start_row = buf_guard.height() - visible_rows;
 
-                                let clip_rect = response.rect;
-                                let origin = clip_rect.min;
+                        let desired_size = Vec2::new(content_w, visible_h);
+                        let (response, painter) = ui.allocate_painter(desired_size, Sense::hover().union(Sense::drag()));
 
+                        let origin = response.rect.min;
+
+                        painter.rect_filled(
+                            Rect::from_min_size(origin, desired_size),
+                            0.0,
+                            Color32::from_rgba_unmultiplied(6, 10, 8, 255),
+                        );
+
+                        for i in 0..visible_rows {
+                            let row_idx = start_row + i;
+                            let y = origin.y + i as f32 * cell_h;
+
+                            let is_selected = panel
+                                .selection
+                                .rows()
+                                .map(|(s, e)| row_idx >= s && row_idx <= e)
+                                .unwrap_or(false);
+
+                            if is_selected {
                                 painter.rect_filled(
-                                    Rect::from_min_size(origin, desired_size),
+                                    Rect::from_min_size(
+                                        Pos2::new(origin.x, y),
+                                        Vec2::new(desired_size.x, cell_h),
+                                    ),
                                     0.0,
-                                    Color32::from_rgba_unmultiplied(6, 10, 8, 255),
+                                    Color32::from_rgba_unmultiplied(0, 100, 80, 80),
                                 );
+                            }
 
-                                for row_idx in 0..buf_guard.height() {
-                                    let y = origin.y + row_idx as f32 * cell_h;
-                                    if y + cell_h < clip_rect.min.y || y > clip_rect.max.y {
-                                        continue;
-                                    }
-
-                                    let mut line_end = 0;
-                                    for col_idx in (0..buf_guard.width()).rev() {
-                                        if buf_guard.lines[row_idx][col_idx].c != ' ' {
-                                            line_end = col_idx + 1;
-                                            break;
-                                        }
-                                    }
-
-                                    for col_idx in 0..line_end {
-                                        let cell = buf_guard.lines[row_idx][col_idx];
-                                        let x = origin.x + col_idx as f32 * cell_w;
-                                        if x + cell_w < clip_rect.min.x || x > clip_rect.max.x {
-                                            continue;
-                                        }
-
-                                        if cell.c != ' ' {
-                                            let fg = if cell.bold {
-                                                Color32::from_rgb(
-                                                    (cell.fg[0] as u32 + 40).min(255) as u8,
-                                                    (cell.fg[1] as u32 + 40).min(255) as u8,
-                                                    (cell.fg[2] as u32 + 40).min(255) as u8,
-                                                )
-                                            } else {
-                                                Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
-                                            };
-
-                                    painter.text(
-                                                Pos2::new(x, y),
-                                                Align2::LEFT_TOP,
-                                                cell.c.to_string(),
-                                                egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                                fg,
-                                            );
-                                        }
-                                    }
+                            let mut line_end = 0;
+                            for col_idx in (0..buf_guard.width()).rev() {
+                                if buf_guard.lines[row_idx][col_idx].c != ' ' {
+                                    line_end = col_idx + 1;
+                                    break;
                                 }
+                            }
 
-                                let (cursor_col, cursor_row) = buf_guard.cursor();
-                                let cursor_x = origin.x + cursor_col as f32 * cell_w;
-                                let cursor_y = origin.y + cursor_row as f32 * cell_h;
+                            for col_idx in 0..line_end {
+                                let cell = buf_guard.lines[row_idx][col_idx];
+                                let x = origin.x + col_idx as f32 * cell_w;
 
-                                if cursor_x >= clip_rect.min.x && cursor_x <= clip_rect.max.x
-                                    && cursor_y >= clip_rect.min.y && cursor_y <= clip_rect.max.y
-                                {
+                                if cell.c != ' ' {
+                                    let fg = if is_selected {
+                                        Color32::from_rgb(0, 255, 200)
+                                    } else if cell.bold {
+                                        Color32::from_rgb(
+                                            (cell.fg[0] as u32 + 40).min(255) as u8,
+                                            (cell.fg[1] as u32 + 40).min(255) as u8,
+                                            (cell.fg[2] as u32 + 40).min(255) as u8,
+                                        )
+                                    } else {
+                                        Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
+                                    };
+
                                     painter.text(
-                                        Pos2::new(cursor_x, cursor_y),
+                                        Pos2::new(x, y),
                                         Align2::LEFT_TOP,
-                                        "▌",
+                                        cell.c.to_string(),
                                         egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                        Color32::from_rgb(0, 200, 160),
+                                        fg,
                                     );
                                 }
-                            });
+                            }
+                        }
+
+                        let (cursor_col, cursor_row) = buf_guard.cursor();
+                        let rel_cursor_row = cursor_row.saturating_sub(start_row);
+                        let cursor_x = origin.x + cursor_col as f32 * cell_w;
+                        let cursor_y = origin.y + rel_cursor_row as f32 * cell_h;
+
+                        if rel_cursor_row < visible_rows {
+                            painter.text(
+                                Pos2::new(cursor_x, cursor_y),
+                                Align2::LEFT_TOP,
+                                "▌",
+                                egui::FontId::new(font_size, egui::FontFamily::Monospace),
+                                Color32::from_rgb(0, 200, 160),
+                            );
+                        }
                     }
                 });
             });
 
-        let response = ui.interact(rect, terminal_id, Sense::click());
+        let response = ui.interact(rect, terminal_id, Sense::click().union(Sense::drag()));
+
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+        }
+
+        if response.drag_started() {
+            let mouse_pos = ui.input(|i| i.pointer.interact_pos()).unwrap_or(Pos2::ZERO);
+            let rel_y = mouse_pos.y - response.rect.min.y;
+            let cell_h = 17.0;
+            let row = (rel_y / cell_h) as usize;
+            panel.selection = Selection {
+                start: Some(row),
+                end: Some(row),
+            };
+            ui.ctx().request_repaint();
+        }
+
+        if response.dragged() {
+            let mouse_pos = ui.input(|i| i.pointer.interact_pos()).unwrap_or(Pos2::ZERO);
+            let rel_y = mouse_pos.y - response.rect.min.y;
+            let cell_h = 17.0;
+            let row = (rel_y / cell_h) as usize;
+            panel.selection.end = Some(row);
+            ui.ctx().request_repaint();
+        }
+
+        if response.drag_stopped() {
+            if panel.selection.is_empty() {
+                panel.selection = Selection::default();
+            }
+            ui.ctx().request_repaint();
+        }
+
         if response.clicked() {
+            if !panel.selection.is_empty() {
+                panel.selection = Selection::default();
+            }
             ui.memory_mut(|m| m.request_focus(terminal_id));
         }
 
@@ -130,36 +286,11 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
             if modifiers.ctrl && modifiers.shift && ui.input(|i| i.key_pressed(egui::Key::C)) {
                 let buffer = term.get_buffer();
                 if let Ok(buf) = buffer.lock() {
-                    let mut text = String::new();
-                    for row in &buf.lines {
-                        let line: String = row.iter().map(|c| c.c).collect();
-                        text.push_str(line.trim_end());
-                        text.push('\n');
-                    }
-                    use std::io::Write;
-                    if let Ok(mut child) = std::process::Command::new("xsel")
-                        .arg("--clipboard")
-                        .arg("--input")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = stdin.write_all(text.as_bytes());
-                        }
-                        let _ = child.wait();
-                    } else if let Ok(mut child) = std::process::Command::new("xclip")
-                        .arg("-selection")
-                        .arg("clipboard")
-                        .arg("-i")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = stdin.write_all(text.as_bytes());
-                        }
-                        let _ = child.wait();
-                    }
+                    let text = panel.get_selected_text(&buf);
+                    clipboard::copy_to_clipboard(&text);
                 }
+                panel.selection = Selection::default();
+                ui.ctx().request_repaint();
                 needs_repaint = true;
             }
 
@@ -215,7 +346,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                 }
 
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    term.handle_key("Escape", false);
+                    panel.selection = Selection::default();
                     needs_repaint = true;
                 }
 
@@ -257,6 +388,23 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                         }
                     }
                 }
+            }
+
+            if panel.show_copied_toast {
+                ui.allocate_ui_at_rect(
+                    Rect::from_min_size(
+                        Pos2::new(rect.max.x - 80.0, rect.min.y + 30.0),
+                        Vec2::new(70.0, 24.0),
+                    ),
+                    |ui| {
+                        ui.label(
+                            RichText::new("Copied!")
+                                .monospace()
+                                .size(11.0)
+                                .color(Color32::from_rgb(0, 255, 200)),
+                        );
+                    },
+                );
             }
 
             if needs_repaint {

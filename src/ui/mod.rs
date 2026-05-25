@@ -1,4 +1,5 @@
 pub mod background;
+pub mod clipboard;
 mod layout;
 pub mod panels;
 pub mod terminal;
@@ -13,7 +14,7 @@ use panels::hardware::draw_hardware;
 use panels::network::draw_network;
 use panels::processes::draw_processes;
 use panels::system_logs::draw_system_logs;
-use panels::terminal::draw_terminal;
+use panels::terminal::{draw_terminal, TerminalPanel};
 use terminal::TerminalWidget;
 
 pub fn setup_visuals(ctx: &egui::Context) {
@@ -52,7 +53,7 @@ pub fn setup_visuals(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache, term: &mut TerminalWidget) {
+pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache, term: &mut TerminalWidget, terminal_panel: &mut TerminalPanel) {
     egui::Area::new("root".into())
         .fixed_pos(Pos2::new(0.0, 0.0))
         .show(ctx, |ui| {
@@ -72,7 +73,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut
             draw_system_logs(&painter, layout.system_logs, state, theme);
 
             ui.allocate_ui_at_rect(layout.terminal, |ui| {
-                draw_terminal(ui, layout.terminal, term, theme);
+                draw_terminal(ui, layout.terminal, term, theme, terminal_panel);
             });
 
             let tb = &layout.topbar;
