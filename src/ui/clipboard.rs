@@ -1,33 +1,94 @@
 use std::io::Write;
+use std::process::{Command, Stdio};
 
 pub fn copy_to_clipboard(text: &str) -> bool {
-    let cmd = if std::process::Command::new("wl-copy").stdin(std::process::Stdio::piped()).spawn().is_ok() {
-        "wl-copy"
-    } else {
-        "xsel"
-    };
+    // 1. Try wl-copy if WAYLAND_DISPLAY is set
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Ok(mut child) = Command::new("wl-copy")
+            .stdin(Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                if stdin.write_all(text.as_bytes()).is_ok() {
+                    drop(stdin);
+                    if let Ok(status) = child.wait() {
+                        if status.success() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-    let args: &[&str] = if cmd == "xsel" {
-        &["--clipboard", "--input"]
-    } else {
-        &[]
-    };
-
-    let mut child = match std::process::Command::new(cmd)
-        .args(args)
-        .stdin(std::process::Stdio::piped())
+    // 2. Try xsel
+    if let Ok(mut child) = Command::new("xsel")
+        .args(&["--clipboard", "--input"])
+        .stdin(Stdio::piped())
         .spawn()
     {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
+        if let Some(mut stdin) = child.stdin.take() {
+            if stdin.write_all(text.as_bytes()).is_ok() {
+                drop(stdin);
+                if let Ok(status) = child.wait() {
+                    if status.success() {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
 
-    let mut stdin = match child.stdin.take() {
-        Some(s) => s,
-        None => return false,
-    };
+    // 3. Try xclip
+    if let Ok(mut child) = Command::new("xclip")
+        .args(&["-selection", "clipboard", "-i"])
+        .stdin(Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            if stdin.write_all(text.as_bytes()).is_ok() {
+                drop(stdin);
+                if let Ok(status) = child.wait() {
+                    if status.success() {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
 
-    let write_ok = stdin.write_all(text.as_bytes()).is_ok();
-    drop(stdin);
-    write_ok && child.wait().map(|e| e.success()).unwrap_or(false)
+    false
+}
+
+pub fn paste_from_clipboard() -> Option<String> {
+    // 1. Try wl-paste if WAYLAND_DISPLAY is set
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Ok(output) = Command::new("wl-paste").output() {
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    return Some(text);
+                }
+            }
+        }
+    }
+
+    // 2. Try xsel
+    if let Ok(output) = Command::new("xsel").args(&["--clipboard", "--output"]).output() {
+        if output.status.success() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                return Some(text);
+            }
+        }
+    }
+
+    // 3. Try xclip
+    if let Ok(output) = Command::new("xclip").args(&["-selection", "clipboard", "-o"]).output() {
+        if output.status.success() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                return Some(text);
+            }
+        }
+    }
+
+    None
 }

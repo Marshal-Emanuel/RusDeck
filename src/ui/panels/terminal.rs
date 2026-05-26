@@ -2,6 +2,12 @@ use egui::{Rect, Frame, Color32, Ui, RichText, Sense, Id, FontId, Align2, Pos2, 
 use crate::theme::Theme;
 use crate::ui::terminal::TerminalWidget;
 
+#[derive(Clone, Copy, Default)]
+struct SelectionState {
+    start: Option<(usize, usize)>,
+    end: Option<(usize, usize)>,
+}
+
 pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: &Theme) {
     let terminal_id = Id::new("terminal_panel");
     let focused = ui.memory(|m| m.has_focus(terminal_id));
@@ -42,14 +48,40 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                         ScrollArea::vertical()
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
+                                let selection_id = Id::new("terminal_selection");
+                                let mut selection: SelectionState = ui.memory(|m| m.data.get_temp(selection_id).unwrap_or_default());
+
                                 let avail = ui.available_size();
                                 let max_h = avail.y * 3.0;
                                 let h = content_h.min(max_h);
                                 let desired_size = Vec2::new(content_w.min(ui.available_width()), h);
-                                let (response, painter) = ui.allocate_painter(desired_size, Sense::hover());
+                                let (response, painter) = ui.allocate_painter(desired_size, Sense::click_and_drag());
 
                                 let origin = response.rect.min;
                                 let clip_rect = response.rect;
+
+                                // Handle selection input
+                                if response.drag_started() {
+                                    if let Some(pos) = ui.input(|i| i.pointer.press_origin()) {
+                                        let rel_x = (pos.x - origin.x).max(0.0);
+                                        let rel_y = (pos.y - origin.y).max(0.0);
+                                        let col = ((rel_x / cell_w) as usize).min(buf_guard.width() - 1);
+                                        let row = ((rel_y / cell_h) as usize).min(buf_guard.height() - 1);
+                                        selection.start = Some((row, col));
+                                        selection.end = Some((row, col));
+                                    }
+                                } else if response.dragged() {
+                                    if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
+                                        let rel_x = (pos.x - origin.x).max(0.0);
+                                        let rel_y = (pos.y - origin.y).max(0.0);
+                                        let col = ((rel_x / cell_w) as usize).min(buf_guard.width() - 1);
+                                        let row = ((rel_y / cell_h) as usize).min(buf_guard.height() - 1);
+                                        selection.end = Some((row, col));
+                                    }
+                                } else if response.clicked() || ui.input(|i| i.pointer.any_pressed()) {
+                                    selection.start = None;
+                                    selection.end = None;
+                                }
 
                                 painter.rect_filled(
                                     Rect::from_min_size(origin, desired_size),
@@ -59,6 +91,21 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
                                 for row_idx in 0..buf_guard.height() {
                                     let y = origin.y + row_idx as f32 * cell_h;
+
+                                    // Render selection highlight background
+                                    for col_idx in 0..buf_guard.width() {
+                                        if is_cell_selected(row_idx, col_idx, selection.start, selection.end) {
+                                            let x = origin.x + col_idx as f32 * cell_w;
+                                            painter.rect_filled(
+                                                Rect::from_min_size(
+                                                    Pos2::new(x, y),
+                                                    Vec2::new(cell_w, cell_h),
+                                                ),
+                                                0.0,
+                                                Color32::from_rgba_unmultiplied(100, 149, 237, 80),
+                                            );
+                                        }
+                                    }
 
                                     let mut line_end = 0;
                                     for col_idx in (0..buf_guard.width()).rev() {
@@ -83,7 +130,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                                 Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
                                             };
 
-                                    painter.text(
+                                            painter.text(
                                                 Pos2::new(x, y),
                                                 Align2::LEFT_TOP,
                                                 cell.c.to_string(),
@@ -109,6 +156,8 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                         Color32::from_rgb(0, 200, 160),
                                     );
                                 }
+
+                                ui.memory_mut(|m| m.data.insert_temp(selection_id, selection));
                             });
                     }
                 });
@@ -123,37 +172,48 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
             let mut needs_repaint = false;
             let modifiers = ui.input(|i| i.modifiers);
 
+            // Clear selection on typing/key presses (excluding copy/paste)
+            let has_keyboard_input = ui.input(|i| {
+                i.events.iter().any(|e| match e {
+                    egui::Event::Key { pressed: true, .. } | egui::Event::Text(_) => true,
+                    _ => false,
+                })
+            });
+            if has_keyboard_input {
+                let selection_id = Id::new("terminal_selection");
+                let is_copy = modifiers.ctrl && modifiers.shift && ui.input(|i| i.key_pressed(egui::Key::C));
+                if !is_copy {
+                    ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
+                }
+            }
+
             if modifiers.ctrl && modifiers.shift && ui.input(|i| i.key_pressed(egui::Key::C)) {
+                let selection_id = Id::new("terminal_selection");
+                let selection: SelectionState = ui.memory(|m| m.data.get_temp(selection_id).unwrap_or_default());
                 let buffer = term.get_buffer();
                 if let Ok(buf) = buffer.lock() {
-                    let mut text = String::new();
-                    for row in &buf.lines {
-                        let line: String = row.iter().map(|c| c.c).collect();
-                        text.push_str(line.trim_end());
-                        text.push('\n');
-                    }
-                    use std::io::Write;
-                    if let Ok(mut child) = std::process::Command::new("xsel")
-                        .arg("--clipboard")
-                        .arg("--input")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = stdin.write_all(text.as_bytes());
+                    let text = if let (Some(s), Some(e)) = (selection.start, selection.end) {
+                        get_selected_text(&buf, s, e)
+                    } else {
+                        // Fallback: Copy the entire buffer screen
+                        let mut t = String::new();
+                        for row in &buf.lines {
+                            let line: String = row.iter().map(|c| c.c).collect();
+                            t.push_str(line.trim_end());
+                            t.push('\n');
                         }
-                        let _ = child.wait();
-                    } else if let Ok(mut child) = std::process::Command::new("xclip")
-                        .arg("-selection")
-                        .arg("clipboard")
-                        .arg("-i")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = stdin.write_all(text.as_bytes());
-                        }
-                        let _ = child.wait();
+                        t
+                    };
+                    ui.ctx().copy_text(text.clone());
+                    crate::ui::clipboard::copy_to_clipboard(&text);
+                }
+                needs_repaint = true;
+            }
+
+            if modifiers.ctrl && modifiers.shift && ui.input(|i| i.key_pressed(egui::Key::V)) {
+                if let Some(text) = crate::ui::clipboard::paste_from_clipboard() {
+                    for c in text.chars() {
+                        term.handle_char(c);
                     }
                 }
                 needs_repaint = true;
@@ -243,14 +303,23 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                 }
 
                 for event in ui.input(|i| i.events.clone()) {
-                    if let egui::Event::Text(text) = event {
-                        for c in text.chars() {
-                            if c.is_control() {
-                                continue;
+                    match event {
+                        egui::Event::Text(text) => {
+                            for c in text.chars() {
+                                if c.is_control() {
+                                    continue;
+                                }
+                                term.handle_char(c);
+                                needs_repaint = true;
                             }
-                            term.handle_char(c);
-                            needs_repaint = true;
                         }
+                        egui::Event::Paste(text) => {
+                            for c in text.chars() {
+                                term.handle_char(c);
+                                needs_repaint = true;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -260,4 +329,88 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
             }
         }
     });
+}
+
+fn is_cell_selected(
+    row: usize,
+    col: usize,
+    start: Option<(usize, usize)>,
+    end: Option<(usize, usize)>,
+) -> bool {
+    if let (Some(s), Some(e)) = (start, end) {
+        let (r1, c1) = if s <= e { s } else { e };
+        let (r2, c2) = if s <= e { e } else { s };
+
+        if row < r1 || row > r2 {
+            return false;
+        }
+        if r1 == r2 {
+            row == r1 && col >= c1 && col <= c2
+        } else if row == r1 {
+            col >= c1
+        } else if row == r2 {
+            col <= c2
+        } else {
+            true
+        }
+    } else {
+        false
+    }
+}
+
+fn get_selected_text(
+    buf: &crate::ui::terminal::TerminalBuffer,
+    start: (usize, usize),
+    end: (usize, usize),
+) -> String {
+    let mut text = String::new();
+    let (s, e) = if start <= end { (start, end) } else { (end, start) };
+    let (r1, c1) = s;
+    let (r2, c2) = e;
+
+    for row in r1..=r2 {
+        let line_cells = &buf.lines[row];
+        let col_start = if row == r1 { c1 } else { 0 };
+        let col_end = if row == r2 { c2.min(line_cells.len() - 1) } else { line_cells.len() - 1 };
+
+        let mut line = String::new();
+        for col in col_start..=col_end {
+            line.push(line_cells[col].c);
+        }
+
+        if row == r2 {
+            text.push_str(line.trim_end());
+        } else {
+            text.push_str(line.trim_end());
+            text.push('\n');
+        }
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_cell_selected() {
+        let start = Some((1, 2));
+        let end = Some((3, 4));
+
+        assert!(!is_cell_selected(0, 0, start, end));
+        assert!(!is_cell_selected(0, 5, start, end));
+
+        assert!(!is_cell_selected(1, 1, start, end));
+        assert!(is_cell_selected(1, 2, start, end));
+        assert!(is_cell_selected(1, 9, start, end));
+
+        assert!(is_cell_selected(2, 0, start, end));
+        assert!(is_cell_selected(2, 9, start, end));
+
+        assert!(is_cell_selected(3, 0, start, end));
+        assert!(is_cell_selected(3, 4, start, end));
+        assert!(!is_cell_selected(3, 5, start, end));
+
+        assert!(!is_cell_selected(4, 0, start, end));
+    }
 }

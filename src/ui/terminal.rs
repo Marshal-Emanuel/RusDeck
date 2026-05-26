@@ -67,8 +67,8 @@ impl TerminalBuffer {
             self.cursor_col = 0;
             self.cursor_row += 1;
             if self.cursor_row >= self.height {
-                self.lines.pop_back();
-                self.lines.push_front(vec![Cell::default(); self.width]);
+                self.lines.pop_front();
+                self.lines.push_back(vec![Cell::default(); self.width]);
                 self.cursor_row = self.height - 1;
             }
         }
@@ -87,8 +87,8 @@ impl TerminalBuffer {
         self.cursor_col = 0;
         self.cursor_row += 1;
         if self.cursor_row >= self.height {
-            self.lines.pop_back();
-            self.lines.push_front(vec![Cell::default(); self.width]);
+            self.lines.pop_front();
+            self.lines.push_back(vec![Cell::default(); self.width]);
             self.cursor_row = self.height - 1;
         }
     }
@@ -123,8 +123,8 @@ impl TerminalBuffer {
     }
 
     fn scroll_up(&mut self) {
-        self.lines.pop_back();
-        self.lines.push_front(vec![Cell::default(); self.width]);
+        self.lines.pop_front();
+        self.lines.push_back(vec![Cell::default(); self.width]);
     }
 
     fn set_fg(&mut self, r: u8, g: u8, b: u8) {
@@ -442,14 +442,19 @@ impl AnsiParser {
             b'L' => {
                 let n = self.params.first().copied().unwrap_or(1) as usize;
                 for _ in 0..n {
-                    buf.scroll_up();
+                    if buf.cursor_row < buf.height {
+                        buf.lines.insert(buf.cursor_row, vec![Cell::default(); buf.width]);
+                        buf.lines.pop_back();
+                    }
                 }
             }
             b'M' => {
                 let n = self.params.first().copied().unwrap_or(1) as usize;
                 for _ in 0..n {
-                    buf.lines.pop_back();
-                    buf.lines.push_front(vec![Cell::default(); buf.width]);
+                    if buf.cursor_row < buf.height {
+                        buf.lines.remove(buf.cursor_row);
+                        buf.lines.push_back(vec![Cell::default(); buf.width]);
+                    }
                 }
             }
             b'P' => {
@@ -589,5 +594,44 @@ fn extended_color(n: u8) -> [u8; 3] {
             [v, v, v]
         }
         _ => [255, 255, 255],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scrolling_direction() {
+        let mut buf = TerminalBuffer::new(10, 3);
+        // Write text to fill the buffer
+        // Row 0
+        buf.put_char('a');
+        buf.newline();
+        // Row 1
+        buf.put_char('b');
+        buf.newline();
+        // Row 2
+        buf.put_char('c');
+        
+        // At this point, the buffer should contain:
+        // Row 0: 'a'
+        // Row 1: 'b'
+        // Row 2: 'c'
+        assert_eq!(buf.lines[0][0].c, 'a');
+        assert_eq!(buf.lines[1][0].c, 'b');
+        assert_eq!(buf.lines[2][0].c, 'c');
+        
+        // Trigger scrolling by adding another newline and char
+        buf.newline();
+        buf.put_char('d');
+        
+        // Now, it should have scrolled UP:
+        // Row 0 should be 'b'
+        // Row 1 should be 'c'
+        // Row 2 should be 'd'
+        assert_eq!(buf.lines[0][0].c, 'b');
+        assert_eq!(buf.lines[1][0].c, 'c');
+        assert_eq!(buf.lines[2][0].c, 'd');
     }
 }

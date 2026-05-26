@@ -1,4 +1,5 @@
 pub mod background;
+pub mod clipboard;
 mod layout;
 pub mod panels;
 pub mod terminal;
