@@ -42,19 +42,19 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                         let font_size = 13.0;
                         let cell_w = 8.5;
                         let cell_h = 17.0;
-                        let content_h = buf_guard.height() as f32 * cell_h;
+                        let total_rows = buf_guard.history.len() + buf_guard.lines.len();
                         let content_w = buf_guard.width() as f32 * cell_w;
 
                         ScrollArea::vertical()
                             .stick_to_bottom(true)
-                            .show(ui, |ui| {
+                            .auto_shrink([false; 2])
+                            .show_rows(ui, cell_h, total_rows, |ui, row_range| {
                                 let selection_id = Id::new("terminal_selection");
                                 let mut selection: SelectionState = ui.memory(|m| m.data.get_temp(selection_id).unwrap_or_default());
 
-                                let avail = ui.available_size();
-                                let max_h = avail.y * 3.0;
-                                let h = content_h.min(max_h);
-                                let desired_size = Vec2::new(content_w.min(ui.available_width()), h);
+                                let visible_rows = row_range.end - row_range.start;
+                                let draw_h = visible_rows as f32 * cell_h;
+                                let desired_size = Vec2::new(content_w.min(ui.available_width()), draw_h);
                                 let (response, painter) = ui.allocate_painter(desired_size, Sense::click_and_drag());
 
                                 let origin = response.rect.min;
@@ -66,7 +66,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                         let rel_x = (pos.x - origin.x).max(0.0);
                                         let rel_y = (pos.y - origin.y).max(0.0);
                                         let col = ((rel_x / cell_w) as usize).min(buf_guard.width() - 1);
-                                        let row = ((rel_y / cell_h) as usize).min(buf_guard.height() - 1);
+                                        let row = row_range.start + ((rel_y / cell_h) as usize).min(visible_rows - 1);
                                         selection.start = Some((row, col));
                                         selection.end = Some((row, col));
                                     }
@@ -75,7 +75,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                         let rel_x = (pos.x - origin.x).max(0.0);
                                         let rel_y = (pos.y - origin.y).max(0.0);
                                         let col = ((rel_x / cell_w) as usize).min(buf_guard.width() - 1);
-                                        let row = ((rel_y / cell_h) as usize).min(buf_guard.height() - 1);
+                                        let row = row_range.start + ((rel_y / cell_h) as usize).min(visible_rows - 1);
                                         selection.end = Some((row, col));
                                     }
                                 } else if response.clicked() || ui.input(|i| i.pointer.any_pressed()) {
@@ -89,12 +89,19 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                     Color32::from_rgba_unmultiplied(6, 10, 8, 255),
                                 );
 
-                                for row_idx in 0..buf_guard.height() {
-                                    let y = origin.y + row_idx as f32 * cell_h;
+                                for virtual_row in row_range.clone() {
+                                    let local_row = virtual_row - row_range.start;
+                                    let y = origin.y + local_row as f32 * cell_h;
+
+                                    let line_cells = if virtual_row < buf_guard.history.len() {
+                                        &buf_guard.history[virtual_row]
+                                    } else {
+                                        &buf_guard.lines[virtual_row - buf_guard.history.len()]
+                                    };
 
                                     // Render selection highlight background
                                     for col_idx in 0..buf_guard.width() {
-                                        if is_cell_selected(row_idx, col_idx, selection.start, selection.end) {
+                                        if is_cell_selected(virtual_row, col_idx, selection.start, selection.end) {
                                             let x = origin.x + col_idx as f32 * cell_w;
                                             painter.rect_filled(
                                                 Rect::from_min_size(
@@ -109,14 +116,14 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
                                     let mut line_end = 0;
                                     for col_idx in (0..buf_guard.width()).rev() {
-                                        if buf_guard.lines[row_idx][col_idx].c != ' ' {
+                                        if line_cells[col_idx].c != ' ' {
                                             line_end = col_idx + 1;
                                             break;
                                         }
                                     }
 
                                     for col_idx in 0..line_end {
-                                        let cell = buf_guard.lines[row_idx][col_idx];
+                                        let cell = line_cells[col_idx];
                                         let x = origin.x + col_idx as f32 * cell_w;
 
                                         if cell.c != ' ' {
@@ -142,19 +149,23 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                 }
 
                                 let (cursor_col, cursor_row) = buf_guard.cursor();
-                                let cursor_x = origin.x + cursor_col as f32 * cell_w;
-                                let cursor_y = origin.y + cursor_row as f32 * cell_h;
+                                let cursor_virtual_row = buf_guard.history.len() + cursor_row;
+                                if cursor_virtual_row >= row_range.start && cursor_virtual_row < row_range.end {
+                                    let local_cursor_row = cursor_virtual_row - row_range.start;
+                                    let cursor_x = origin.x + cursor_col as f32 * cell_w;
+                                    let cursor_y = origin.y + local_cursor_row as f32 * cell_h;
 
-                                if cursor_x >= clip_rect.min.x && cursor_x <= clip_rect.max.x
-                                    && cursor_y >= clip_rect.min.y && cursor_y <= clip_rect.max.y
-                                {
-                                    painter.text(
-                                        Pos2::new(cursor_x, cursor_y),
-                                        Align2::LEFT_TOP,
-                                        "▌",
-                                        egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                        Color32::from_rgb(0, 200, 160),
-                                    );
+                                    if cursor_x >= clip_rect.min.x && cursor_x <= clip_rect.max.x
+                                        && cursor_y >= clip_rect.min.y && cursor_y <= clip_rect.max.y
+                                    {
+                                        painter.text(
+                                            Pos2::new(cursor_x, cursor_y),
+                                            Align2::LEFT_TOP,
+                                            "▌",
+                                            egui::FontId::new(font_size, egui::FontFamily::Monospace),
+                                            Color32::from_rgb(0, 200, 160),
+                                        );
+                                    }
                                 }
 
                                 ui.memory_mut(|m| m.data.insert_temp(selection_id, selection));
@@ -172,6 +183,10 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
             let mut needs_repaint = false;
             let modifiers = ui.input(|i| i.modifiers);
 
+            let selection_id = Id::new("terminal_selection");
+            let selection: SelectionState = ui.memory(|m| m.data.get_temp(selection_id).unwrap_or_default());
+            let has_selection = selection.start.is_some() && selection.end.is_some();
+
             // Clear selection on typing/key presses (excluding copy/paste)
             let has_keyboard_input = ui.input(|i| {
                 i.events.iter().any(|e| match e {
@@ -179,17 +194,21 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                     _ => false,
                 })
             });
-            if has_keyboard_input {
-                let selection_id = Id::new("terminal_selection");
-                let is_copy = modifiers.ctrl && modifiers.shift && ui.input(|i| i.key_pressed(egui::Key::C));
-                if !is_copy {
-                    ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
+
+            // 1. Check Copy
+            let mut trigger_copy = false;
+            for event in ui.input(|i| i.events.clone()) {
+                if matches!(event, egui::Event::Copy) {
+                    trigger_copy = true;
+                }
+            }
+            if modifiers.ctrl && ui.input(|i| i.key_pressed(egui::Key::C)) {
+                if modifiers.shift || has_selection {
+                    trigger_copy = true;
                 }
             }
 
-            if modifiers.ctrl && modifiers.shift && ui.input(|i| i.key_pressed(egui::Key::C)) {
-                let selection_id = Id::new("terminal_selection");
-                let selection: SelectionState = ui.memory(|m| m.data.get_temp(selection_id).unwrap_or_default());
+            if trigger_copy {
                 let buffer = term.get_buffer();
                 if let Ok(buf) = buffer.lock() {
                     let text = if let (Some(s), Some(e)) = (selection.start, selection.end) {
@@ -197,8 +216,13 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                     } else {
                         // Fallback: Copy the entire buffer screen
                         let mut t = String::new();
-                        for row in &buf.lines {
-                            let line: String = row.iter().map(|c| c.c).collect();
+                        for row in 0..(buf.history.len() + buf.lines.len()) {
+                            let line_cells = if row < buf.history.len() {
+                                &buf.history[row]
+                            } else {
+                                &buf.lines[row - buf.history.len()]
+                            };
+                            let line: String = line_cells.iter().map(|c| c.c).collect();
                             t.push_str(line.trim_end());
                             t.push('\n');
                         }
@@ -210,13 +234,30 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                 needs_repaint = true;
             }
 
-            if modifiers.ctrl && modifiers.shift && ui.input(|i| i.key_pressed(egui::Key::V)) {
+            // 2. Check Paste
+            let mut trigger_paste = None;
+            for event in ui.input(|i| i.events.clone()) {
+                if let egui::Event::Paste(text) = event {
+                    trigger_paste = Some(text);
+                }
+            }
+            if trigger_paste.is_none() && modifiers.ctrl && ui.input(|i| i.key_pressed(egui::Key::V)) {
                 if let Some(text) = crate::ui::clipboard::paste_from_clipboard() {
-                    for c in text.chars() {
-                        term.handle_char(c);
-                    }
+                    trigger_paste = Some(text);
+                }
+            }
+
+            if let Some(text) = trigger_paste {
+                for c in text.chars() {
+                    term.handle_char(c);
                 }
                 needs_repaint = true;
+                ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
+            }
+
+            // 3. Clear selection if keyboard input happened and we didn't copy
+            if has_keyboard_input && !trigger_copy {
+                ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
             }
 
             if !modifiers.shift || !modifiers.ctrl {
@@ -277,8 +318,10 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
                 if modifiers.ctrl {
                     if ui.input(|i| i.key_pressed(egui::Key::C)) {
-                        term.handle_key("c", true);
-                        needs_repaint = true;
+                        if !has_selection {
+                            term.handle_key("c", true);
+                            needs_repaint = true;
+                        }
                     }
                     if ui.input(|i| i.key_pressed(egui::Key::D)) {
                         term.handle_key("d", true);
@@ -309,12 +352,6 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                 if c.is_control() {
                                     continue;
                                 }
-                                term.handle_char(c);
-                                needs_repaint = true;
-                            }
-                        }
-                        egui::Event::Paste(text) => {
-                            for c in text.chars() {
                                 term.handle_char(c);
                                 needs_repaint = true;
                             }
@@ -369,7 +406,11 @@ fn get_selected_text(
     let (r2, c2) = e;
 
     for row in r1..=r2 {
-        let line_cells = &buf.lines[row];
+        let line_cells = if row < buf.history.len() {
+            &buf.history[row]
+        } else {
+            &buf.lines[row - buf.history.len()]
+        };
         let col_start = if row == r1 { c1 } else { 0 };
         let col_end = if row == r2 { c2.min(line_cells.len() - 1) } else { line_cells.len() - 1 };
 

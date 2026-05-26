@@ -26,6 +26,7 @@ impl Default for Cell {
 
 #[derive(Clone)]
 pub struct TerminalBuffer {
+    pub history: VecDeque<Vec<Cell>>,
     pub lines: VecDeque<Vec<Cell>>,
     pub width: usize,
     pub height: usize,
@@ -39,6 +40,7 @@ pub struct TerminalBuffer {
 impl TerminalBuffer {
     pub fn new(width: usize, height: usize) -> Self {
         Self {
+            history: VecDeque::new(),
             lines: VecDeque::from(vec![vec![Cell::default(); width]; height]),
             width,
             height,
@@ -53,6 +55,7 @@ impl TerminalBuffer {
     pub fn resize(&mut self, width: usize, height: usize) {
         self.width = width;
         self.height = height;
+        self.history.clear();
         self.lines = VecDeque::from(vec![vec![Cell::default(); width]; height]);
         self.cursor_col = 0;
         self.cursor_row = 0;
@@ -62,12 +65,21 @@ impl TerminalBuffer {
     pub fn height(&self) -> usize { self.height }
     pub fn cursor(&self) -> (usize, usize) { (self.cursor_col, self.cursor_row) }
 
+    fn push_history(&mut self, line: Vec<Cell>) {
+        self.history.push_back(line);
+        if self.history.len() > 2000 {
+            self.history.pop_front();
+        }
+    }
+
     fn put_char(&mut self, c: char) {
         if self.cursor_col >= self.width {
             self.cursor_col = 0;
             self.cursor_row += 1;
             if self.cursor_row >= self.height {
-                self.lines.pop_front();
+                if let Some(discarded) = self.lines.pop_front() {
+                    self.push_history(discarded);
+                }
                 self.lines.push_back(vec![Cell::default(); self.width]);
                 self.cursor_row = self.height - 1;
             }
@@ -87,7 +99,9 @@ impl TerminalBuffer {
         self.cursor_col = 0;
         self.cursor_row += 1;
         if self.cursor_row >= self.height {
-            self.lines.pop_front();
+            if let Some(discarded) = self.lines.pop_front() {
+                self.push_history(discarded);
+            }
             self.lines.push_back(vec![Cell::default(); self.width]);
             self.cursor_row = self.height - 1;
         }
@@ -123,7 +137,9 @@ impl TerminalBuffer {
     }
 
     fn scroll_up(&mut self) {
-        self.lines.pop_front();
+        if let Some(discarded) = self.lines.pop_front() {
+            self.push_history(discarded);
+        }
         self.lines.push_back(vec![Cell::default(); self.width]);
     }
 
@@ -177,7 +193,7 @@ impl TerminalWidget {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Ok(mut b) = buffer_clone.lock() {
-                            parser.feed(&mut b, &buf[..n]);
+                            parser.feed_bytes(&mut b, &buf[..n]);
                         }
                     }
                     Err(_) => break,
@@ -260,6 +276,7 @@ struct AnsiParser {
     params: Vec<i64>,
     current_param: String,
     has_intermediate: bool,
+    leftover: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -277,34 +294,79 @@ impl AnsiParser {
             params: Vec::new(),
             current_param: String::new(),
             has_intermediate: false,
+            leftover: Vec::new(),
         }
     }
 
-    fn feed(&mut self, buf: &mut TerminalBuffer, data: &[u8]) {
-        for &b in data {
+    fn feed_bytes(&mut self, buf: &mut TerminalBuffer, data: &[u8]) {
+        self.leftover.extend_from_slice(data);
+
+        let mut idx = 0;
+        while idx < self.leftover.len() {
+            let res = match std::str::from_utf8(&self.leftover[idx..]) {
+                Ok(s) => Ok(s.to_string()),
+                Err(e) => {
+                    let valid_len = e.valid_up_to();
+                    let valid_str = if valid_len > 0 {
+                        Some(std::str::from_utf8(&self.leftover[idx..idx + valid_len]).unwrap().to_string())
+                    } else {
+                        None
+                    };
+                    Err((valid_str, e.error_len()))
+                }
+            };
+
+            match res {
+                Ok(s_str) => {
+                    self.feed(buf, &s_str);
+                    self.leftover.clear();
+                    return;
+                }
+                Err((valid_str, error_len)) => {
+                    if let Some(s_str) = valid_str {
+                        let len = s_str.len();
+                        self.feed(buf, &s_str);
+                        idx += len;
+                    }
+                    if let Some(err_len) = error_len {
+                        idx += err_len;
+                    } else {
+                        // Incomplete UTF-8 sequence at the end of buffer, keep for next read.
+                        self.leftover.drain(..idx);
+                        return;
+                    }
+                }
+            }
+        }
+        self.leftover.clear();
+    }
+
+    fn feed(&mut self, buf: &mut TerminalBuffer, data: &str) {
+        for c in data.chars() {
+            let val = c as u32;
             match self.state {
                 ParserState::Normal => {
-                    match b {
-                        0x1b => self.state = ParserState::Escape,
-                        0x0a => buf.newline(),
-                        0x0d => buf.carriage_return(),
-                        0x08 | 0x7f => buf.backspace(),
-                        0x0c => {
+                    match c {
+                        '\x1b' => self.state = ParserState::Escape,
+                        '\n' => buf.newline(),
+                        '\r' => buf.carriage_return(),
+                        '\x08' | '\x7f' => buf.backspace(),
+                        '\x0c' => {
                             buf.erase_screen();
                         }
-                        _ if b >= 0x20 => buf.put_char(b as char),
+                        _ if val >= 0x20 => buf.put_char(c),
                         _ => {}
                     }
                 }
                 ParserState::Escape => {
-                    match b {
-                        b'[' => {
+                    match c {
+                        '[' => {
                             self.state = ParserState::CsiEntry;
                             self.params.clear();
                             self.current_param.clear();
                             self.has_intermediate = false;
                         }
-                        b']' => {
+                        ']' => {
                             self.state = ParserState::OscEntry;
                             self.current_param.clear();
                         }
@@ -314,26 +376,26 @@ impl AnsiParser {
                     }
                 }
                 ParserState::CsiEntry => {
-                    if b >= b'0' && b <= b'9' {
-                        self.current_param.push(b as char);
-                    } else if b == b';' {
+                    if c >= '0' && c <= '9' {
+                        self.current_param.push(c);
+                    } else if c == ';' {
                         self.push_param();
-                    } else if b >= 0x20 && b <= 0x2f {
+                    } else if val >= 0x20 && val <= 0x2f {
                         self.has_intermediate = true;
-                    } else if b == b'?' || b == b'>' || b == b'!' || b == b'$' {
+                    } else if c == '?' || c == '>' || c == '!' || c == '$' {
                         // Private mode prefix — skip it
                     } else {
                         self.push_param();
-                        self.execute_csi(buf, b);
+                        self.execute_csi(buf, c as u8);
                         self.state = ParserState::Normal;
                     }
                 }
                 ParserState::OscEntry => {
-                    if b == 0x07 || b == 0x1b {
+                    if c == '\x07' || c == '\x1b' {
                         // End of OSC sequence — ignore
                         self.state = ParserState::Normal;
                     } else {
-                        self.current_param.push(b as char);
+                        self.current_param.push(c);
                     }
                 }
             }
@@ -633,5 +695,9 @@ mod tests {
         assert_eq!(buf.lines[0][0].c, 'b');
         assert_eq!(buf.lines[1][0].c, 'c');
         assert_eq!(buf.lines[2][0].c, 'd');
+        
+        // The discarded first line ('a') should now be in the history buffer
+        assert_eq!(buf.history.len(), 1);
+        assert_eq!(buf.history[0][0].c, 'a');
     }
 }
