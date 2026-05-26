@@ -40,14 +40,16 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                         let content_w = buf_guard.width() as f32 * cell_w;
 
                         ScrollArea::vertical()
-                            .auto_shrink(false)
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
-                                let desired_size = Vec2::new(content_w.min(ui.available_width()), content_h);
+                                let avail = ui.available_size();
+                                let max_h = avail.y * 3.0;
+                                let h = content_h.min(max_h);
+                                let desired_size = Vec2::new(content_w.min(ui.available_width()), h);
                                 let (response, painter) = ui.allocate_painter(desired_size, Sense::hover());
 
+                                let origin = response.rect.min;
                                 let clip_rect = response.rect;
-                                let origin = clip_rect.min;
 
                                 painter.rect_filled(
                                     Rect::from_min_size(origin, desired_size),
@@ -57,9 +59,6 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
                                 for row_idx in 0..buf_guard.height() {
                                     let y = origin.y + row_idx as f32 * cell_h;
-                                    if y + cell_h < clip_rect.min.y || y > clip_rect.max.y {
-                                        continue;
-                                    }
 
                                     let mut line_end = 0;
                                     for col_idx in (0..buf_guard.width()).rev() {
@@ -72,9 +71,6 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                     for col_idx in 0..line_end {
                                         let cell = buf_guard.lines[row_idx][col_idx];
                                         let x = origin.x + col_idx as f32 * cell_w;
-                                        if x + cell_w < clip_rect.min.x || x > clip_rect.max.x {
-                                            continue;
-                                        }
 
                                         if cell.c != ' ' {
                                             let fg = if cell.bold {
