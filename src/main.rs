@@ -9,7 +9,6 @@ use app::AppState;
 use theme::Theme;
 use ui::background::BackgroundCache;
 use ui::terminal::TerminalWidget;
-use ui::panels::terminal::TerminalPanel;
 
 fn main() -> eframe::Result<()> {
     let state = Arc::new(RwLock::new(AppState::new()));
@@ -40,7 +39,6 @@ fn main() -> eframe::Result<()> {
                 repaint_request_rx,
                 bg_cache: BackgroundCache::new(),
                 terminal,
-                terminal_panel: TerminalPanel::new(),
                 cursor_timer: Instant::now(),
             })
         }),
@@ -53,7 +51,6 @@ struct RusDeckApp {
     repaint_request_rx: std::sync::mpsc::Receiver<()>,
     bg_cache: BackgroundCache,
     terminal: TerminalWidget,
-    terminal_panel: TerminalPanel,
     cursor_timer: Instant,
 }
 
@@ -81,7 +78,7 @@ impl eframe::App for RusDeckApp {
 
         {
             let state = self.state.read().unwrap();
-            ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal, &mut self.terminal_panel);
+            ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal);
         }
 
         if self.repaint_request_rx.try_recv().is_ok() {
