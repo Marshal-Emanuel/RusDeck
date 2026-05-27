@@ -33,14 +33,25 @@ pub fn setup_visuals(ctx: &egui::Context) {
     ));
     let mut fonts = egui::epaint::text::FontDefinitions::default();
     fonts.font_data.insert("FiraCodeNF".to_owned(), nerd_font.into());
-    fonts.families.insert(
-        egui::FontFamily::Monospace,
-        vec!["FiraCodeNF".to_owned()],
-    );
-    fonts.families.insert(
-        egui::FontFamily::Proportional,
-        vec!["FiraCodeNF".to_owned()],
-    );
+    
+    if let Some(vec) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        vec.insert(0, "FiraCodeNF".to_owned());
+    } else {
+        fonts.families.insert(
+            egui::FontFamily::Monospace,
+            vec!["FiraCodeNF".to_owned()],
+        );
+    }
+    
+    if let Some(vec) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        vec.insert(0, "FiraCodeNF".to_owned());
+    } else {
+        fonts.families.insert(
+            egui::FontFamily::Proportional,
+            vec!["FiraCodeNF".to_owned()],
+        );
+    }
+
     style.text_styles = [
         (egui::TextStyle::Small, egui::FontId::new(10.0, egui::FontFamily::Monospace)),
         (egui::TextStyle::Body, egui::FontId::new(13.0, egui::FontFamily::Monospace)),

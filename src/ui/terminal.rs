@@ -17,8 +17,8 @@ impl Default for Cell {
     fn default() -> Self {
         Self {
             c: ' ',
-            fg: [207, 221, 225],
-            bg: [0, 0, 0],
+            fg: [248, 248, 242],
+            bg: [6, 10, 8],
             bold: false,
         }
     }
@@ -46,8 +46,8 @@ impl TerminalBuffer {
             height,
             cursor_col: 0,
             cursor_row: 0,
-            fg: [207, 221, 225],
-            bg: [0, 0, 0],
+            fg: [248, 248, 242],
+            bg: [6, 10, 8],
             bold: false,
         }
     }
@@ -184,6 +184,7 @@ impl TerminalWidget {
         let mut reader = pair.master.try_clone_reader().ok()?;
         let writer: Box<dyn Write + Send> = pair.master.take_writer().ok()?;
         let writer = Arc::new(Mutex::new(writer));
+        let writer_clone = Arc::clone(&writer);
 
         let _reader = thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -193,7 +194,7 @@ impl TerminalWidget {
                     Ok(0) => break,
                     Ok(n) => {
                         if let Ok(mut b) = buffer_clone.lock() {
-                            parser.feed_bytes(&mut b, &buf[..n]);
+                            parser.feed_bytes(&mut b, &buf[..n], &writer_clone);
                         }
                     }
                     Err(_) => break,
@@ -279,12 +280,13 @@ struct AnsiParser {
     leftover: Vec<u8>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum ParserState {
     Normal,
     Escape,
     CsiEntry,
     OscEntry,
+    DcsEntry,
 }
 
 impl AnsiParser {
@@ -298,7 +300,7 @@ impl AnsiParser {
         }
     }
 
-    fn feed_bytes(&mut self, buf: &mut TerminalBuffer, data: &[u8]) {
+    fn feed_bytes(&mut self, buf: &mut TerminalBuffer, data: &[u8], writer: &Arc<Mutex<Box<dyn Write + Send>>>) {
         self.leftover.extend_from_slice(data);
 
         let mut idx = 0;
@@ -318,14 +320,14 @@ impl AnsiParser {
 
             match res {
                 Ok(s_str) => {
-                    self.feed(buf, &s_str);
+                    self.feed(buf, &s_str, writer);
                     self.leftover.clear();
                     return;
                 }
                 Err((valid_str, error_len)) => {
                     if let Some(s_str) = valid_str {
                         let len = s_str.len();
-                        self.feed(buf, &s_str);
+                        self.feed(buf, &s_str, writer);
                         idx += len;
                     }
                     if let Some(err_len) = error_len {
@@ -341,7 +343,7 @@ impl AnsiParser {
         self.leftover.clear();
     }
 
-    fn feed(&mut self, buf: &mut TerminalBuffer, data: &str) {
+    fn feed(&mut self, buf: &mut TerminalBuffer, data: &str, writer: &Arc<Mutex<Box<dyn Write + Send>>>) {
         for c in data.chars() {
             let val = c as u32;
             match self.state {
@@ -370,6 +372,14 @@ impl AnsiParser {
                             self.state = ParserState::OscEntry;
                             self.current_param.clear();
                         }
+                        'P' | '_' | '^' | 'X' => {
+                            // Device Control String, Application Program Command, Privacy Message, Start of String
+                            self.state = ParserState::DcsEntry;
+                        }
+                        '\\' => {
+                            // String Terminator (ST)
+                            self.state = ParserState::Normal;
+                        }
                         _ => {
                             self.state = ParserState::Normal;
                         }
@@ -383,19 +393,28 @@ impl AnsiParser {
                     } else if val >= 0x20 && val <= 0x2f {
                         self.has_intermediate = true;
                     } else if c == '?' || c == '>' || c == '!' || c == '$' {
-                        // Private mode prefix — skip it
+                        // Private mode prefix — skip it but mark as intermediate
+                        self.has_intermediate = true;
                     } else {
                         self.push_param();
-                        self.execute_csi(buf, c as u8);
+                        self.execute_csi(buf, c as u8, writer);
                         self.state = ParserState::Normal;
                     }
                 }
                 ParserState::OscEntry => {
-                    if c == '\x07' || c == '\x1b' {
-                        // End of OSC sequence — ignore
+                    if c == '\x07' {
                         self.state = ParserState::Normal;
+                    } else if c == '\x1b' {
+                        self.state = ParserState::Escape;
                     } else {
                         self.current_param.push(c);
+                    }
+                }
+                ParserState::DcsEntry => {
+                    if c == '\x07' {
+                        self.state = ParserState::Normal;
+                    } else if c == '\x1b' {
+                        self.state = ParserState::Escape;
                     }
                 }
             }
@@ -411,8 +430,15 @@ impl AnsiParser {
         self.current_param.clear();
     }
 
-    fn execute_csi(&mut self, buf: &mut TerminalBuffer, final_byte: u8) {
+    fn execute_csi(&mut self, buf: &mut TerminalBuffer, final_byte: u8, writer: &Arc<Mutex<Box<dyn Write + Send>>>) {
         if self.has_intermediate {
+            if final_byte == b'c' {
+                // Secondary DA reply
+                if let Ok(mut w) = writer.lock() {
+                    let _ = w.write_all(b"\x1b[>1;95;0c");
+                    let _ = w.flush();
+                }
+            }
             return;
         }
 
@@ -451,8 +477,15 @@ impl AnsiParser {
             b'H' | b'f' => {
                 let row = self.params.first().copied().unwrap_or(1) as usize;
                 let col = self.params.get(1).copied().unwrap_or(1) as usize;
-                buf.cursor_row = (row - 1).min(buf.height - 1);
-                buf.cursor_col = (col - 1).min(buf.width - 1);
+                buf.cursor_row = (row.saturating_sub(1)).min(buf.height - 1);
+                buf.cursor_col = (col.saturating_sub(1)).min(buf.width - 1);
+            }
+            b'c' => {
+                // Primary Device Attributes reply: VT100 with Advanced Video Option
+                if let Ok(mut w) = writer.lock() {
+                    let _ = w.write_all(b"\x1b[?1;2c");
+                    let _ = w.flush();
+                }
             }
             b'J' => {
                 match self.params.first().copied().unwrap_or(0) {
@@ -578,7 +611,7 @@ impl AnsiParser {
                         i += 4;
                     }
                 }
-                39 => buf.set_fg(207, 221, 225),
+                39 => buf.set_fg(248, 248, 242),
                 40..=47 => {
                     let c = ansi_color(self.params[i] as u8 - 40);
                     buf.set_bg(c[0], c[1], c[2]);
@@ -596,7 +629,7 @@ impl AnsiParser {
                         i += 4;
                     }
                 }
-                49 => buf.set_bg(0, 0, 0),
+                49 => buf.set_bg(6, 10, 8),
                 90..=97 => {
                     let c = bright_color(self.params[i] as u8 - 90);
                     buf.set_fg(c[0], c[1], c[2]);
@@ -614,28 +647,28 @@ impl AnsiParser {
 
 fn ansi_color(n: u8) -> [u8; 3] {
     match n {
-        0 => [0, 0, 0],
-        1 => [205, 0, 0],
-        2 => [0, 205, 0],
-        3 => [205, 205, 0],
-        4 => [0, 0, 238],
-        5 => [205, 0, 205],
-        6 => [0, 205, 205],
-        7 => [229, 229, 229],
-        _ => [229, 229, 229],
+        0 => [6, 10, 8],          // Dark background / black
+        1 => [255, 85, 85],       // Dracula red
+        2 => [80, 250, 123],      // Dracula green
+        3 => [241, 250, 140],     // Dracula yellow
+        4 => [0, 171, 255],       // Tron blue (sensible, vibrant electric blue!)
+        5 => [255, 121, 198],     // Dracula magenta
+        6 => [139, 233, 253],     // Dracula cyan
+        7 => [248, 248, 242],     // Dracula white/gray
+        _ => [248, 248, 242],
     }
 }
 
 fn bright_color(n: u8) -> [u8; 3] {
     match n {
-        0 => [127, 127, 127],
-        1 => [255, 85, 85],
-        2 => [85, 255, 85],
-        3 => [255, 255, 85],
-        4 => [85, 85, 255],
-        5 => [255, 85, 255],
-        6 => [85, 255, 255],
-        7 => [255, 255, 255],
+        0 => [98, 114, 164],      // Dracula comment gray
+        1 => [255, 110, 110],     // Bright red
+        2 => [90, 255, 135],      // Bright green
+        3 => [255, 255, 150],     // Bright yellow
+        4 => [51, 190, 255],      // Bright electric blue
+        5 => [255, 140, 210],     // Bright magenta
+        6 => [160, 240, 255],     // Bright cyan
+        7 => [255, 255, 255],     // Pure white
         _ => [255, 255, 255],
     }
 }
