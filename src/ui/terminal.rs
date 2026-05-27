@@ -214,6 +214,10 @@ impl TerminalWidget {
         &self.buffer
     }
 
+    pub fn process_id(&self) -> Option<u32> {
+        self._child.process_id()
+    }
+
     pub fn resize(&mut self, cols: usize, rows: usize) {
         if let Ok(mut buf) = self.buffer.lock() {
             buf.resize(cols, rows);

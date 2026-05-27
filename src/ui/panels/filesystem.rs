@@ -92,7 +92,7 @@ fn get_icon_for_file(ext: &str) -> &'static str {
     }
 }
 
-pub fn draw_filesystem(ui: &mut Ui, rect: Rect, explorer: &mut FileExplorerState, theme: &Theme) {
+pub fn draw_filesystem(ui: &mut Ui, rect: Rect, explorer: &mut FileExplorerState, theme: &Theme) -> Option<PathBuf> {
     let painter = ui.painter();
     draw_panel_frame(painter, rect, "FILESYSTEM", theme);
 
@@ -197,12 +197,13 @@ pub fn draw_filesystem(ui: &mut Ui, rect: Rect, explorer: &mut FileExplorerState
     });
 
     if let Some(target) = navigate_to {
-        explorer.current_path.push(target);
-        explorer.refresh();
+        let mut new_path = explorer.current_path.clone();
+        new_path.push(target);
+        return Some(new_path);
     } else if go_up {
         if let Some(parent) = explorer.current_path.parent() {
-            explorer.current_path = parent.to_path_buf();
-            explorer.refresh();
+            return Some(parent.to_path_buf());
         }
     }
+    None
 }

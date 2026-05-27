@@ -77,11 +77,25 @@ impl eframe::App for RusDeckApp {
             if focused {
                 ctx.request_repaint();
             }
+
+            if let Some(pid) = self.terminal.process_id() {
+                if let Ok(cwd) = std::fs::read_link(format!("/proc/{}/cwd", pid)) {
+                    if self.file_explorer.current_path != cwd {
+                        self.file_explorer.current_path = cwd;
+                        self.file_explorer.refresh();
+                    }
+                }
+            }
         }
 
-        {
+        let dir_change = {
             let state = self.state.read().unwrap();
-            ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal, &mut self.file_explorer);
+            ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal, &mut self.file_explorer)
+        };
+
+        if let Some(new_path) = dir_change {
+            let cmd = format!("cd {}\n", new_path.to_string_lossy());
+            self.terminal.write_input(cmd.as_bytes());
         }
 
         let mut should_repaint = false;
