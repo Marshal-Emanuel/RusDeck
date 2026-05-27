@@ -40,7 +40,7 @@ impl LogBuffer {
 
     fn read_journalctl() -> Option<Vec<LogLine>> {
         let output = Command::new("journalctl")
-            .args(["--no-pager", "-n", "500", "-o", "short-iso", "--quiet"])
+            .args(["--no-pager", "-n", "50", "-o", "short-iso", "--quiet"])
             .output()
             .ok()?;
         if !output.status.success() {

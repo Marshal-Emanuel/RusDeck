@@ -81,7 +81,12 @@ impl eframe::App for RusDeckApp {
             ui::draw(ctx, &state, &self.theme, &mut self.bg_cache, &mut self.terminal);
         }
 
-        if self.repaint_request_rx.try_recv().is_ok() {
+        let mut should_repaint = false;
+        while self.repaint_request_rx.try_recv().is_ok() {
+            should_repaint = true;
+        }
+
+        if should_repaint {
             ctx.request_repaint();
         } else {
             ctx.request_repaint_after(std::time::Duration::from_secs(1));
