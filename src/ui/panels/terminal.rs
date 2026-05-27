@@ -243,29 +243,71 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                                 }
                             }
 
+                            let mut run_str = String::new();
+                            let mut run_start_col = 0;
+                            let mut run_fg = Color32::TRANSPARENT;
+                            let mut run_bold = false;
+
                             for col_idx in 0..line_end {
                                 let cell = line_cells[col_idx];
-                                let x = origin.x + col_idx as f32 * cell_w;
-
-                                if cell.c != ' ' {
-                                    let fg = if cell.bold {
-                                        Color32::from_rgb(
-                                            (cell.fg[0] as u32 + 40).min(255) as u8,
-                                            (cell.fg[1] as u32 + 40).min(255) as u8,
-                                            (cell.fg[2] as u32 + 40).min(255) as u8,
-                                        )
-                                    } else {
-                                        Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
-                                    };
-
-                                    painter.text(
-                                        Pos2::new(x, y),
-                                        Align2::LEFT_TOP,
-                                        cell.c.to_string(),
-                                        egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                        fg,
-                                    );
+                                if cell.c == ' ' {
+                                    if !run_str.is_empty() {
+                                        let rx = origin.x + run_start_col as f32 * cell_w;
+                                        painter.text(
+                                            Pos2::new(rx, y),
+                                            Align2::LEFT_TOP,
+                                            &run_str,
+                                            egui::FontId::new(font_size, egui::FontFamily::Monospace),
+                                            run_fg,
+                                        );
+                                        run_str.clear();
+                                    }
+                                    continue;
                                 }
+
+                                let fg = if cell.bold {
+                                    Color32::from_rgb(
+                                        (cell.fg[0] as u32 + 40).min(255) as u8,
+                                        (cell.fg[1] as u32 + 40).min(255) as u8,
+                                        (cell.fg[2] as u32 + 40).min(255) as u8,
+                                    )
+                                } else {
+                                    Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
+                                };
+
+                                if run_str.is_empty() {
+                                    run_start_col = col_idx;
+                                    run_fg = fg;
+                                    run_bold = cell.bold;
+                                    run_str.push(cell.c);
+                                } else if fg == run_fg && cell.bold == run_bold {
+                                    run_str.push(cell.c);
+                                } else {
+                                    let rx = origin.x + run_start_col as f32 * cell_w;
+                                    painter.text(
+                                        Pos2::new(rx, y),
+                                        Align2::LEFT_TOP,
+                                        &run_str,
+                                        egui::FontId::new(font_size, egui::FontFamily::Monospace),
+                                        run_fg,
+                                    );
+                                    run_start_col = col_idx;
+                                    run_fg = fg;
+                                    run_bold = cell.bold;
+                                    run_str.clear();
+                                    run_str.push(cell.c);
+                                }
+                            }
+
+                            if !run_str.is_empty() {
+                                let rx = origin.x + run_start_col as f32 * cell_w;
+                                painter.text(
+                                    Pos2::new(rx, y),
+                                    Align2::LEFT_TOP,
+                                    &run_str,
+                                    egui::FontId::new(font_size, egui::FontFamily::Monospace),
+                                    run_fg,
+                                );
                             }
                         }
 

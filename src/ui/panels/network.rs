@@ -128,63 +128,79 @@ fn draw_dual_waveform(painter: &Painter, rect: Rect, rx_history: &std::collectio
     let g_left = rect.left() + label_width;
     let g_rect = Rect::from_min_max(Pos2::new(g_left, rect.top() + 6.0), Pos2::new(rect.right() - 6.0, rect.bottom() - 6.0));
 
-    let max_val = rx_history.iter().chain(tx_history.iter()).cloned().fold(100_000.0_f64, f64::max);
+    let max_rx = rx_history.iter().cloned().fold(100_000.0_f64, f64::max);
+    let max_tx = tx_history.iter().cloned().fold(100_000.0_f64, f64::max);
     let n = len as f32;
 
+    let half_h = g_rect.height() * 0.44; // Max height for each graph (44% of total height to leave a midline gap)
+    let mid_y = g_rect.center().y;
+
     // 1. Draw Axis Labels
+    // TX (Upper Half) labels
     painter.text(
         Pos2::new(g_left - 6.0, g_rect.top()),
         Align2::RIGHT_CENTER,
-        format_rate_compact(max_val),
+        format!("{}\u{25b2}", format_rate_compact(max_tx)),
         FontId::monospace(8.0),
         theme.low(),
     );
     painter.text(
-        Pos2::new(g_left - 6.0, g_rect.center().y),
+        Pos2::new(g_left - 6.0, mid_y - 6.0),
         Align2::RIGHT_CENTER,
-        format_rate_compact(max_val / 2.0),
+        "0B\u{25b2}",
         FontId::monospace(8.0),
         theme.dimmed(),
+    );
+
+    // RX (Lower Half) labels
+    painter.text(
+        Pos2::new(g_left - 6.0, mid_y + 6.0),
+        Align2::RIGHT_CENTER,
+        format!("{}\u{25bc}", format_rate_compact(max_rx)),
+        FontId::monospace(8.0),
+        theme.low(),
     );
     painter.text(
         Pos2::new(g_left - 6.0, g_rect.bottom()),
         Align2::RIGHT_CENTER,
-        "0B",
+        "0B\u{25bc}",
         FontId::monospace(8.0),
-        theme.low(),
+        theme.dimmed(),
     );
 
     // 2. Draw Gridlines
     painter.line_segment([Pos2::new(g_left, g_rect.top()), Pos2::new(g_rect.right(), g_rect.top())], Stroke::new(1.0, theme.low()));
     painter.line_segment([Pos2::new(g_left, g_rect.bottom()), Pos2::new(g_rect.right(), g_rect.bottom())], Stroke::new(1.0, theme.low()));
     
-    // Mid dashed gridline
+    // Mid dashed gridline (at center split)
     let grid_segments = 15;
     let w = g_rect.width();
     let seg_w = w / (grid_segments as f32 * 2.0 - 1.0);
     for i in 0..grid_segments {
         let sx = g_left + (i as f32 * 2.0) * seg_w;
         painter.line_segment(
-            [Pos2::new(sx, g_rect.center().y), Pos2::new(sx + seg_w, g_rect.center().y)],
+            [Pos2::new(sx, mid_y), Pos2::new(sx + seg_w, mid_y)],
             Stroke::new(1.0, theme.faint()),
         );
     }
 
     // 3. Compute points
+    // RX points (starts at bottom and goes UP towards center)
     let rx_pts: Vec<Pos2> = rx_history.iter().take(len).enumerate().map(|(i, &v)| {
         let x = g_rect.left() + (i as f32 / (n - 1.0)) * g_rect.width();
-        let y = g_rect.bottom() - (v / max_val).min(1.0) as f32 * g_rect.height();
+        let y = g_rect.bottom() - (v / max_rx).min(1.0) as f32 * half_h;
         Pos2::new(x, y)
     }).collect();
 
+    // TX points (starts at midline and goes UP towards top)
     let tx_pts: Vec<Pos2> = tx_history.iter().take(len).enumerate().map(|(i, &v)| {
         let x = g_rect.left() + (i as f32 / (n - 1.0)) * g_rect.width();
-        let y = g_rect.bottom() - (v / max_val).min(1.0) as f32 * g_rect.height();
+        let y = (mid_y - 4.0) - (v / max_tx).min(1.0) as f32 * half_h;
         Pos2::new(x, y)
     }).collect();
 
     // 4. Draw shaded paths under the lines segment-by-segment (using convex quads/trapezoids to prevent triangulation bugs)
-    // RX Shading
+    // RX Shading (under RX line down to bottom)
     for i in 0..rx_pts.len() - 1 {
         let points = vec![
             rx_pts[i],
@@ -195,13 +211,13 @@ fn draw_dual_waveform(painter: &Painter, rect: Rect, rx_history: &std::collectio
         painter.add(egui::Shape::convex_polygon(points, theme.ghost(), Stroke::NONE));
     }
 
-    // TX Shading (ultra faint secondary fill to avoid cluttering)
+    // TX Shading (under TX line down to midline)
     for i in 0..tx_pts.len() - 1 {
         let points = vec![
             tx_pts[i],
             tx_pts[i + 1],
-            Pos2::new(tx_pts[i + 1].x, g_rect.bottom()),
-            Pos2::new(tx_pts[i].x, g_rect.bottom()),
+            Pos2::new(tx_pts[i + 1].x, mid_y - 4.0),
+            Pos2::new(tx_pts[i].x, mid_y - 4.0),
         ];
         painter.add(egui::Shape::convex_polygon(points, theme.with_alpha(4), Stroke::NONE));
     }
@@ -214,43 +230,67 @@ fn draw_dual_waveform(painter: &Painter, rect: Rect, rx_history: &std::collectio
         painter.line_segment([tx_pts[i], tx_pts[i + 1]], Stroke::new(1.0, theme.mid())); // TX
     }
 
-    // 6. Peak value tracker
-    if max_val > 0.0 {
-        let mut peak_val = 0.0_f64;
-        let mut peak_idx = 0;
-        let mut is_rx = true;
+    // 6. Peak value tracker (RX Peak)
+    if max_rx > 0.0 {
+        let mut rx_peak_val = 0.0_f64;
+        let mut rx_peak_idx = 0;
         for (i, &v) in rx_history.iter().take(len).enumerate() {
-            if v > peak_val { peak_val = v; peak_idx = i; is_rx = true; }
+            if v > rx_peak_val { rx_peak_val = v; rx_peak_idx = i; }
         }
-        for (i, &v) in tx_history.iter().take(len).enumerate() {
-            if v > peak_val { peak_val = v; peak_idx = i; is_rx = false; }
-        }
+        let rx_mx = g_rect.left() + (rx_peak_idx as f32 / (n - 1.0)) * g_rect.width();
+        let rx_my = g_rect.bottom() - (rx_peak_val / max_rx).min(1.0) as f32 * half_h;
+        let rx_peak_pos = Pos2::new(rx_mx, rx_my);
 
-        let mx = g_rect.left() + (peak_idx as f32 / (n - 1.0)) * g_rect.width();
-        let my = g_rect.bottom() - (peak_val / max_val).min(1.0) as f32 * g_rect.height();
-        let peak_pos = Pos2::new(mx, my);
+        painter.circle_filled(rx_peak_pos, 3.0, theme.full());
+        painter.circle_filled(rx_peak_pos, 6.0, theme.faint());
 
-        // Peak Neon Dot
-        let peak_color = if is_rx { theme.full() } else { theme.mid() };
-        painter.circle_filled(peak_pos, 3.0, peak_color);
-        painter.circle_filled(peak_pos, 6.0, theme.faint());
-
-        // Dotted peak line
         let peak_stroke = Stroke::new(1.0, theme.dimmed());
         let mut sx = g_left;
         while sx < g_rect.right() {
             painter.line_segment(
-                [Pos2::new(sx, my), Pos2::new((sx + 3.0).min(g_rect.right()), my)],
+                [Pos2::new(sx, rx_my), Pos2::new((sx + 3.0).min(g_rect.right()), rx_my)],
                 peak_stroke,
             );
             sx += 6.0;
         }
 
-        // Draw Peak value label text at the top-right of the dotted line
         painter.text(
-            Pos2::new(g_rect.right() - 4.0, my - 3.0),
+            Pos2::new(g_rect.right() - 4.0, rx_my - 3.0),
             Align2::RIGHT_BOTTOM,
-            format!("MAX: {}", format_rate(peak_val)),
+            format!("MAX RX: {}", format_rate(rx_peak_val)),
+            FontId::monospace(8.0),
+            theme.high(),
+        );
+    }
+
+    // 7. Peak value tracker (TX Peak)
+    if max_tx > 0.0 {
+        let mut tx_peak_val = 0.0_f64;
+        let mut tx_peak_idx = 0;
+        for (i, &v) in tx_history.iter().take(len).enumerate() {
+            if v > tx_peak_val { tx_peak_val = v; tx_peak_idx = i; }
+        }
+        let tx_mx = g_rect.left() + (tx_peak_idx as f32 / (n - 1.0)) * g_rect.width();
+        let tx_my = (mid_y - 4.0) - (tx_peak_val / max_tx).min(1.0) as f32 * half_h;
+        let tx_peak_pos = Pos2::new(tx_mx, tx_my);
+
+        painter.circle_filled(tx_peak_pos, 3.0, theme.mid());
+        painter.circle_filled(tx_peak_pos, 6.0, theme.faint());
+
+        let peak_stroke = Stroke::new(1.0, theme.dimmed());
+        let mut sx = g_left;
+        while sx < g_rect.right() {
+            painter.line_segment(
+                [Pos2::new(sx, tx_my), Pos2::new((sx + 3.0).min(g_rect.right()), tx_my)],
+                peak_stroke,
+            );
+            sx += 6.0;
+        }
+
+        painter.text(
+            Pos2::new(g_rect.right() - 4.0, tx_my - 3.0),
+            Align2::RIGHT_BOTTOM,
+            format!("MAX TX: {}", format_rate(tx_peak_val)),
             FontId::monospace(8.0),
             theme.high(),
         );
