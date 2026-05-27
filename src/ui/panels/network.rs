@@ -126,7 +126,7 @@ fn draw_dual_waveform(painter: &Painter, rect: Rect, rx_history: &std::collectio
     // Left margin for graph scale labels
     let label_width = 30.0;
     let g_left = rect.left() + label_width;
-    let g_rect = Rect::from_min_max(Pos2::new(g_left, rect.top() + 6.0), Pos2::new(rect.right() - 6.0, rect.bottom() - 6.0));
+    let g_rect = Rect::from_min_max(Pos2::new(g_left, rect.top() + 6.0), Pos2::new(rect.right() - 16.0, rect.bottom() - 6.0));
 
     let max_rx = rx_history.iter().cloned().fold(100_000.0_f64, f64::max);
     let max_tx = tx_history.iter().cloned().fold(100_000.0_f64, f64::max);

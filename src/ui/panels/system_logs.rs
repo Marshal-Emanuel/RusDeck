@@ -1,10 +1,77 @@
-use egui::{Pos2, Align2, FontId, Rect, Painter};
+use egui::{Pos2, Align2, FontId, Rect, Painter, Color32};
 use crate::app::AppState;
 use crate::theme::Theme;
-use super::draw_panel_frame;
 
 pub fn draw_system_logs(painter: &Painter, rect: Rect, state: &AppState, theme: &Theme) {
-    draw_panel_frame(painter, rect, "SYSTEM_LOGS", theme);
+    let clip = 12.0; // Chamfer matching the normal panels
+    let step_h = 24.0;
+    let step_x = rect.right() - 250.0; // Adjust step width for logs panel
+
+    let points = vec![
+        Pos2::new(rect.left(), rect.top()),
+        Pos2::new(rect.right() - clip, rect.top()),
+        Pos2::new(rect.right(), rect.top() + clip),
+        Pos2::new(rect.right(), rect.bottom() - step_h),
+        Pos2::new(step_x, rect.bottom() - step_h),
+        Pos2::new(step_x - step_h, rect.bottom()),
+        Pos2::new(rect.left() + clip, rect.bottom()),
+        Pos2::new(rect.left(), rect.bottom() - clip),
+    ];
+
+    let fill = Color32::from_rgba_unmultiplied(6, 10, 8, 255);
+    painter.add(egui::Shape::convex_polygon(points.clone(), fill, egui::Stroke::NONE));
+    painter.add(egui::Shape::closed_line(points, egui::Stroke::new(1.0, theme.low())));
+
+    // Nested segments in the notch
+    let h_height = 12.0; 
+    let chunk_widths = vec![80.0, 10.0, 25.0];
+    let mut current_x = step_x + 15.0;
+    
+    for &w in &chunk_widths {
+        if current_x + w + h_height > rect.right() - 10.0 { break; }
+        let chunk_poly = vec![
+            Pos2::new(current_x, rect.bottom()),
+            Pos2::new(current_x + w, rect.bottom()),
+            Pos2::new(current_x + w + h_height, rect.bottom() - h_height),
+            Pos2::new(current_x + h_height, rect.bottom() - h_height),
+        ];
+        painter.add(egui::Shape::convex_polygon(chunk_poly, theme.accent, egui::Stroke::NONE));
+        current_x += w + 6.0;
+    }
+
+    let thick_stroke = egui::Stroke::new(2.5, theme.accent);
+    // Top-Right Bracket
+    painter.add(egui::Shape::line(vec![
+        Pos2::new(rect.right() - clip - 12.0, rect.top()),
+        Pos2::new(rect.right() - clip, rect.top()),
+        Pos2::new(rect.right(), rect.top() + clip),
+        Pos2::new(rect.right(), rect.top() + clip + 12.0),
+    ], thick_stroke));
+    
+    // Bottom-Left Bracket
+    painter.add(egui::Shape::line(vec![
+        Pos2::new(rect.left() + clip + 12.0, rect.bottom()),
+        Pos2::new(rect.left() + clip, rect.bottom()),
+        Pos2::new(rect.left(), rect.bottom() - clip),
+        Pos2::new(rect.left(), rect.bottom() - clip - 12.0),
+    ], thick_stroke));
+
+    // Futuristic dot indicator before the label
+    let dot_x = rect.left() + clip + 4.0;
+    let dot_y = rect.top() + 15.0;
+    painter.rect_filled(
+        Rect::from_min_size(Pos2::new(dot_x, dot_y), egui::vec2(4.0, 4.0)),
+        0.0,
+        theme.accent,
+    );
+
+    painter.text(
+        Pos2::new(rect.left() + clip + 14.0, rect.top() + 10.0),
+        Align2::LEFT_TOP,
+        "SYSTEM_LOGS",
+        FontId::monospace(14.0),
+        theme.high(),
+    );
 
     let chamfer = 10.0;
     let ts_width = 200.0;

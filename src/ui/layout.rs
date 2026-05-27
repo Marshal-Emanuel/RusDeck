@@ -16,7 +16,7 @@ impl Layout {
         let gap = 6.0;
         let topbar_h = 48.0;
         let bottom_h = 200.0;
-        let side_w = 280.0;
+        let side_w = 340.0;
         let content_top = topbar_h + pad;
         let content_bottom = screen_height - pad;
 

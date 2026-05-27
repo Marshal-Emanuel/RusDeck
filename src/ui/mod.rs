@@ -64,7 +64,7 @@ pub fn setup_visuals(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache, term: &mut TerminalWidget) {
+pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut BackgroundCache, term: &mut TerminalWidget, file_explorer: &mut panels::filesystem::FileExplorerState) {
     egui::Area::new("root".into())
         .fixed_pos(Pos2::new(0.0, 0.0))
         .show(ctx, |ui| {
@@ -78,7 +78,11 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &Theme, bg_cache: &mut
             let layout = Layout::new(screen_w, screen_h);
 
             draw_hardware(&painter, layout.hardware, state, theme);
-            draw_filesystem(&painter, layout.storage, state, theme);
+            
+            ui.allocate_ui_at_rect(layout.storage, |ui| {
+                draw_filesystem(ui, layout.storage, file_explorer, theme);
+            });
+            
             draw_network(&painter, layout.network, state, theme);
             draw_processes(&painter, layout.processes, state, theme);
             draw_system_logs(&painter, layout.system_logs, state, theme);

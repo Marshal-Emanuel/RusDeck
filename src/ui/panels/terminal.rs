@@ -22,27 +22,26 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
     let bounds = rect.shrink(4.0);
     let c = 28.0; // Chamfer size
     
-    // Background Polygon with top-right and bottom-left chamfers
-    let bg_points = vec![
-        Pos2::new(bounds.min.x, bounds.min.y),
-        Pos2::new(bounds.max.x - c, bounds.min.y),
-        Pos2::new(bounds.max.x, bounds.min.y + c),
-        Pos2::new(bounds.max.x, bounds.max.y),
-        Pos2::new(bounds.min.x + c, bounds.max.y),
-        Pos2::new(bounds.min.x, bounds.max.y - c),
-    ];
-    painter.add(egui::Shape::convex_polygon(bg_points, fill_color, egui::Stroke::NONE));
+    let step_h = 24.0;
+    let step_x = bounds.max.x - 220.0;
 
-    // Outer continuous thin border (1px) wrapping the background polygon
-    let outer_stroke = egui::Stroke::new(1.0, theme.low());
-    painter.add(egui::Shape::closed_line(vec![
-        Pos2::new(bounds.min.x, bounds.min.y),
+    // Background Polygon with top-right, bottom-left, top-left chamfers, and a lifted stepped bottom-right edge
+    let bg_points = vec![
+        Pos2::new(bounds.min.x + 6.0, bounds.min.y),
         Pos2::new(bounds.max.x - c, bounds.min.y),
         Pos2::new(bounds.max.x, bounds.min.y + c),
-        Pos2::new(bounds.max.x, bounds.max.y),
+        Pos2::new(bounds.max.x, bounds.max.y - step_h),
+        Pos2::new(step_x, bounds.max.y - step_h),
+        Pos2::new(step_x - step_h, bounds.max.y),
         Pos2::new(bounds.min.x + c, bounds.max.y),
         Pos2::new(bounds.min.x, bounds.max.y - c),
-    ], outer_stroke));
+        Pos2::new(bounds.min.x, bounds.min.y + 6.0),
+    ];
+    painter.add(egui::Shape::convex_polygon(bg_points.clone(), fill_color, egui::Stroke::NONE));
+
+    // Continuous stepped outer border (open at top-left corner for the tech node)
+    let outer_stroke = egui::Stroke::new(1.0, theme.low());
+    painter.add(egui::Shape::line(bg_points, outer_stroke));
 
     let thick_stroke = egui::Stroke::new(4.0, theme.accent);
     let glow_stroke = egui::Stroke::new(12.0, theme.accent.linear_multiply(0.15)); // Shading glow
@@ -57,30 +56,25 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
     painter.add(egui::Shape::line(top_right_bracket.clone(), glow_stroke));
     painter.add(egui::Shape::line(top_right_bracket, thick_stroke));
 
-    // Prominent Bottom-Right Block and Hatching (Inspo Style)
+    // Segmented blocks nesting in the notch created by the step-up
     let h_height = 14.0; // Height of the decoration
-    let block_end = bounds.max.x - 110.0;
-    let block_start = block_end - 100.0;
+    let mut current_x = step_x + 20.0;
+    let chunk_widths = vec![100.0, 12.0, 30.0]; // Long block, gap, short block, gap, medium block
     
-    // Thick solid block on bottom edge
-    let solid_poly = vec![
-        Pos2::new(block_start, bounds.max.y),
-        Pos2::new(block_end, bounds.max.y),
-        Pos2::new(block_end + h_height, bounds.max.y - h_height),
-        Pos2::new(block_start + h_height, bounds.max.y - h_height),
-    ];
-    painter.add(egui::Shape::convex_polygon(solid_poly, theme.accent, egui::Stroke::NONE));
-
-    // Large diagonal hatching blocks
-    for i in 0..5 {
-        let hx = block_end + 15.0 + (i as f32 * 16.0);
-        let hatch_poly = vec![
-            Pos2::new(hx, bounds.max.y),
-            Pos2::new(hx + 8.0, bounds.max.y),
-            Pos2::new(hx + 8.0 + h_height, bounds.max.y - h_height),
-            Pos2::new(hx + h_height, bounds.max.y - h_height),
+    for &w in &chunk_widths {
+        if current_x + w + h_height > bounds.max.x - 10.0 {
+            break; // Avoid overflowing past the right edge
+        }
+        
+        let chunk_poly = vec![
+            Pos2::new(current_x, bounds.max.y),
+            Pos2::new(current_x + w, bounds.max.y),
+            Pos2::new(current_x + w + h_height, bounds.max.y - h_height),
+            Pos2::new(current_x + h_height, bounds.max.y - h_height),
         ];
-        painter.add(egui::Shape::convex_polygon(hatch_poly, theme.accent, egui::Stroke::NONE));
+        painter.add(egui::Shape::convex_polygon(chunk_poly, theme.accent, egui::Stroke::NONE));
+        
+        current_x += w + 8.0; // Gap between chunks
     }
 
     // Heavy Bottom-Left Chamfer Bracket
@@ -93,15 +87,36 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
     painter.add(egui::Shape::line(bottom_left_bracket.clone(), glow_stroke));
     painter.add(egui::Shape::line(bottom_left_bracket, thick_stroke));
 
-    // Top-Left Circuit Routing Line (kept inside bounds)
-    let circ_stroke = egui::Stroke::new(1.5, theme.high());
-    let node_pos = Pos2::new(bounds.min.x + 10.0, bounds.min.y + 10.0);
-    painter.circle_filled(node_pos, 2.5, theme.accent);
+    // Top-Left Tech Node acting as the corner edge (High-tech reticle/crosshair design)
+    let node_pos = Pos2::new(bounds.min.x + 6.0, bounds.min.y + 6.0);
+    painter.circle_stroke(node_pos, 6.0, egui::Stroke::new(1.5, theme.accent)); // Outer edge ring
+    painter.circle_filled(node_pos, 1.5, theme.high()); // Inner core dot
+    
+    // Crosshair ticks
     painter.add(egui::Shape::line(vec![
-        node_pos,
-        Pos2::new(bounds.min.x + 24.0, bounds.min.y + 10.0),
-        Pos2::new(bounds.min.x + 30.0, bounds.min.y + 4.0),
-        Pos2::new(bounds.min.x + 100.0, bounds.min.y + 4.0),
+        Pos2::new(node_pos.x - 4.5, node_pos.y),
+        Pos2::new(node_pos.x - 2.5, node_pos.y),
+    ], egui::Stroke::new(1.0, theme.accent)));
+    painter.add(egui::Shape::line(vec![
+        Pos2::new(node_pos.x + 2.5, node_pos.y),
+        Pos2::new(node_pos.x + 4.5, node_pos.y),
+    ], egui::Stroke::new(1.0, theme.accent)));
+    painter.add(egui::Shape::line(vec![
+        node_pos - Vec2::new(0.0, 4.5),
+        node_pos - Vec2::new(0.0, 2.5),
+    ], egui::Stroke::new(1.0, theme.accent)));
+    painter.add(egui::Shape::line(vec![
+        node_pos + Vec2::new(0.0, 2.5),
+        node_pos + Vec2::new(0.0, 4.5),
+    ], egui::Stroke::new(1.0, theme.accent)));
+    
+    // Circuit routing line extending inwards from the node (like it was originally)
+    let circ_stroke = egui::Stroke::new(1.5, theme.high());
+    painter.add(egui::Shape::line(vec![
+        Pos2::new(bounds.min.x + 12.0, bounds.min.y + 6.0), // Starts at right edge of node
+        Pos2::new(bounds.min.x + 24.0, bounds.min.y + 6.0),
+        Pos2::new(bounds.min.x + 30.0, bounds.min.y + 12.0),
+        Pos2::new(bounds.min.x + 100.0, bounds.min.y + 12.0),
     ], circ_stroke));
 
     // Left Edge Data Track (kept inside bounds)
@@ -125,16 +140,21 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
         Pos2::new(bounds.max.x - 3.0, mid_y + 5.0),
     ], circ_stroke));
 
-    // Inner structural outline
+    // Inner structural outline (matching the step-up on the right side)
     let inner_bounds = bounds.shrink(6.0);
     let inner_stroke = egui::Stroke::new(1.0, theme.faint());
-    painter.add(egui::Shape::closed_line(vec![
-        Pos2::new(inner_bounds.min.x, inner_bounds.min.y),
+    let inner_step_x = step_x - 6.0;
+    
+    painter.add(egui::Shape::line(vec![
+        Pos2::new(inner_bounds.min.x + 12.0, inner_bounds.min.y),
         Pos2::new(inner_bounds.max.x - (c - 6.0), inner_bounds.min.y),
         Pos2::new(inner_bounds.max.x, inner_bounds.min.y + (c - 6.0)),
-        Pos2::new(inner_bounds.max.x, inner_bounds.max.y),
+        Pos2::new(inner_bounds.max.x, inner_bounds.max.y - step_h),
+        Pos2::new(inner_step_x, inner_bounds.max.y - step_h),
+        Pos2::new(inner_step_x - step_h, inner_bounds.max.y),
         Pos2::new(inner_bounds.min.x + (c - 6.0), inner_bounds.max.y),
         Pos2::new(inner_bounds.min.x, inner_bounds.max.y - (c - 6.0)),
+        Pos2::new(inner_bounds.min.x, inner_bounds.min.y + 12.0),
     ], inner_stroke));
 
     // 2. Draw terminal contents safely inside the inner frame
@@ -343,30 +363,138 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
 
         if focused {
             let mut needs_repaint = false;
-            let modifiers = ui.input(|i| i.modifiers);
-
             let selection_id = Id::new("terminal_selection");
             let selection: SelectionState = ui.memory(|m| m.data.get_temp(selection_id).unwrap_or_default());
             let has_selection = selection.start.is_some() && selection.end.is_some();
 
-            // Clear selection on typing/key presses (excluding copy/paste)
-            let has_keyboard_input = ui.input(|i| {
-                i.events.iter().any(|e| match e {
-                    egui::Event::Key { pressed: true, .. } | egui::Event::Text(_) => true,
-                    _ => false,
-                })
-            });
-
-            // 1. Check Copy
+            // Process events sequentially (Copy, Paste, Keyboard Input, Control keys)
+            let events = ui.input(|i| i.events.clone());
+            let mut has_keyboard_input = false;
             let mut trigger_copy = false;
-            for event in ui.input(|i| i.events.clone()) {
-                if matches!(event, egui::Event::Copy) {
-                    trigger_copy = true;
+            let mut ctrl_c_pressed = false;
+
+            for event in &events {
+                match event {
+                    egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                        has_keyboard_input = true;
+                        if modifiers.ctrl {
+                            match key {
+                                egui::Key::C => {
+                                    ctrl_c_pressed = true;
+                                }
+                                egui::Key::D => {
+                                    term.handle_key("d", true);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::Z => {
+                                    term.handle_key("z", true);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::L => {
+                                    term.handle_key("l", true);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::U => {
+                                    term.handle_key("u", true);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::K => {
+                                    term.handle_key("k", true);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::V => {
+                                    if !modifiers.shift {
+                                        if let Some(text) = crate::ui::clipboard::paste_from_clipboard() {
+                                            for c in text.chars() {
+                                                term.handle_char(c);
+                                            }
+                                            needs_repaint = true;
+                                            ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            match key {
+                                egui::Key::Enter => {
+                                    term.handle_key("Enter", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::Backspace => {
+                                    term.handle_key("Backspace", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::Tab => {
+                                    term.handle_key("Tab", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::ArrowUp => {
+                                    term.handle_key("ArrowUp", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::ArrowDown => {
+                                    term.handle_key("ArrowDown", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::ArrowLeft => {
+                                    term.handle_key("ArrowLeft", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::ArrowRight => {
+                                    term.handle_key("ArrowRight", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::Home => {
+                                    term.handle_key("Home", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::End => {
+                                    term.handle_key("End", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::Delete => {
+                                    term.handle_key("Delete", false);
+                                    needs_repaint = true;
+                                }
+                                egui::Key::Escape => {
+                                    term.handle_key("Escape", false);
+                                    needs_repaint = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    egui::Event::Text(text) => {
+                        has_keyboard_input = true;
+                        for c in text.chars() {
+                            if c.is_control() {
+                                continue;
+                            }
+                            term.handle_char(c);
+                            needs_repaint = true;
+                        }
+                    }
+                    egui::Event::Paste(text) => {
+                        for c in text.chars() {
+                            term.handle_char(c);
+                        }
+                        needs_repaint = true;
+                        ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
+                    }
+                    egui::Event::Copy => {
+                        ctrl_c_pressed = true;
+                    }
+                    _ => {}
                 }
             }
-            if modifiers.ctrl && ui.input(|i| i.key_pressed(egui::Key::C)) {
-                if modifiers.shift || has_selection {
+
+            if ctrl_c_pressed {
+                if has_selection {
                     trigger_copy = true;
+                } else {
+                    term.handle_key("c", true);
+                    needs_repaint = true;
                 }
             }
 
@@ -396,131 +524,9 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                 needs_repaint = true;
             }
 
-            // 2. Check Paste
-            let mut trigger_paste = None;
-            for event in ui.input(|i| i.events.clone()) {
-                if let egui::Event::Paste(text) = event {
-                    trigger_paste = Some(text);
-                }
-            }
-            if trigger_paste.is_none() && modifiers.ctrl && ui.input(|i| i.key_pressed(egui::Key::V)) {
-                if let Some(text) = crate::ui::clipboard::paste_from_clipboard() {
-                    trigger_paste = Some(text);
-                }
-            }
-
-            if let Some(text) = trigger_paste {
-                for c in text.chars() {
-                    term.handle_char(c);
-                }
-                needs_repaint = true;
-                ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
-            }
-
-            // 3. Clear selection if keyboard input happened and we didn't copy
+            // Clear selection if keyboard input happened and we didn't copy
             if has_keyboard_input && !trigger_copy {
                 ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
-            }
-
-            if !modifiers.shift || !modifiers.ctrl {
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    term.handle_key("Enter", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::Backspace)) {
-                    term.handle_key("Backspace", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
-                    term.handle_key("Tab", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                    term.handle_key("ArrowUp", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                    term.handle_key("ArrowDown", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-                    term.handle_key("ArrowLeft", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-                    term.handle_key("ArrowRight", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::Home)) {
-                    term.handle_key("Home", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::End)) {
-                    term.handle_key("End", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
-                    term.handle_key("Delete", false);
-                    needs_repaint = true;
-                }
-
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    term.handle_key("Escape", false);
-                    needs_repaint = true;
-                }
-
-                if modifiers.ctrl {
-                    if ui.input(|i| i.key_pressed(egui::Key::C)) {
-                        if !has_selection {
-                            term.handle_key("c", true);
-                            needs_repaint = true;
-                        }
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::D)) {
-                        term.handle_key("d", true);
-                        needs_repaint = true;
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::Z)) {
-                        term.handle_key("z", true);
-                        needs_repaint = true;
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::L)) {
-                        term.handle_key("l", true);
-                        needs_repaint = true;
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::U)) {
-                        term.handle_key("u", true);
-                        needs_repaint = true;
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::K)) {
-                        term.handle_key("k", true);
-                        needs_repaint = true;
-                    }
-                }
-
-                for event in ui.input(|i| i.events.clone()) {
-                    match event {
-                        egui::Event::Text(text) => {
-                            for c in text.chars() {
-                                if c.is_control() {
-                                    continue;
-                                }
-                                term.handle_char(c);
-                                needs_repaint = true;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
             }
 
             if needs_repaint {
