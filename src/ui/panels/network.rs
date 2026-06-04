@@ -189,6 +189,7 @@ fn draw_dual_waveform(painter: &Painter, rect: Rect, rx_history: &std::collectio
     let rx_pts: Vec<Pos2> = rx_history.iter().take(len).enumerate().map(|(i, &v)| {
         let x = g_rect.left() + (i as f32 / (n - 1.0)) * g_rect.width();
         let y = g_rect.bottom() - (v / max_rx).min(1.0) as f32 * half_h;
+        let y = y.clamp(mid_y + 1.0, g_rect.bottom() - 1.0);
         Pos2::new(x, y)
     }).collect();
 
@@ -196,6 +197,7 @@ fn draw_dual_waveform(painter: &Painter, rect: Rect, rx_history: &std::collectio
     let tx_pts: Vec<Pos2> = tx_history.iter().take(len).enumerate().map(|(i, &v)| {
         let x = g_rect.left() + (i as f32 / (n - 1.0)) * g_rect.width();
         let y = (mid_y - 4.0) - (v / max_tx).min(1.0) as f32 * half_h;
+        let y = y.clamp(g_rect.top() + 1.0, mid_y - 4.0);
         Pos2::new(x, y)
     }).collect();
 
