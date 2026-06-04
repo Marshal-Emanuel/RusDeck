@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem, MasterPty};
 
 #[derive(Clone, Copy)]
 pub struct Cell {
@@ -53,12 +53,38 @@ impl TerminalBuffer {
     }
 
     pub fn resize(&mut self, width: usize, height: usize) {
+        if self.width == width && self.height == height {
+            return;
+        }
+
+        // Adjust all history lines to the new width
+        for line in &mut self.history {
+            line.resize(width, Cell::default());
+        }
+
+        // Adjust active lines to the new width
+        for line in &mut self.lines {
+            line.resize(width, Cell::default());
+        }
+
+        // Adjust height of active screen
+        if self.lines.len() < height {
+            while self.lines.len() < height {
+                self.lines.push_back(vec![Cell::default(); width]);
+            }
+        } else if self.lines.len() > height {
+            while self.lines.len() > height {
+                if let Some(line) = self.lines.pop_front() {
+                    self.push_history(line);
+                }
+            }
+        }
+
         self.width = width;
         self.height = height;
-        self.history.clear();
-        self.lines = VecDeque::from(vec![vec![Cell::default(); width]; height]);
-        self.cursor_col = 0;
-        self.cursor_row = 0;
+
+        self.cursor_col = self.cursor_col.min(width - 1);
+        self.cursor_row = self.cursor_row.min(height - 1);
     }
 
     pub fn width(&self) -> usize { self.width }
@@ -158,15 +184,21 @@ impl TerminalBuffer {
     }
 }
 
+pub struct TerminalTab {
+    pub title: String,
+    pub widget: TerminalWidget,
+}
+
 pub struct TerminalWidget {
     buffer: Arc<Mutex<TerminalBuffer>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     _child: Box<dyn Child + Send>,
     _reader: thread::JoinHandle<()>,
+    master: Box<dyn MasterPty + Send>,
 }
 
 impl TerminalWidget {
-    pub fn new(cols: usize, rows: usize) -> Option<Self> {
+    pub fn new(cols: usize, rows: usize, ctx: egui::Context) -> Option<Self> {
         let pty_system = NativePtySystem::default();
         let pair = pty_system.openpty(PtySize {
             rows: rows as u16,
@@ -196,6 +228,7 @@ impl TerminalWidget {
                         if let Ok(mut b) = buffer_clone.lock() {
                             parser.feed_bytes(&mut b, &buf[..n], &writer_clone);
                         }
+                        ctx.request_repaint();
                     }
                     Err(_) => break,
                 }
@@ -207,6 +240,7 @@ impl TerminalWidget {
             writer,
             _child: child,
             _reader,
+            master: pair.master,
         })
     }
 
@@ -218,9 +252,32 @@ impl TerminalWidget {
         self._child.process_id()
     }
 
+    pub fn is_alive(&mut self) -> bool {
+        match self._child.try_wait() {
+            Ok(None) => true,
+            _ => false,
+        }
+    }
+
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        if let Ok(mut buf) = self.buffer.lock() {
-            buf.resize(cols, rows);
+        let size_changed = if let Ok(mut buf) = self.buffer.lock() {
+            if buf.width() == cols && buf.height() == rows {
+                false
+            } else {
+                buf.resize(cols, rows);
+                true
+            }
+        } else {
+            false
+        };
+
+        if size_changed {
+            let _ = self.master.resize(PtySize {
+                rows: rows as u16,
+                cols: cols as u16,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
         }
     }
 
@@ -231,43 +288,6 @@ impl TerminalWidget {
         }
     }
 
-    pub fn handle_key(&mut self, key: &str, ctrl: bool) {
-        let bytes: &[u8] = match key {
-            "Enter" => b"\r",
-            "Backspace" => b"\x7f",
-            "Tab" => b"\t",
-            "Escape" => b"\x1b",
-            "ArrowUp" => b"\x1b[A",
-            "ArrowDown" => b"\x1b[B",
-            "ArrowRight" => b"\x1b[C",
-            "ArrowLeft" => b"\x1b[D",
-            "Home" => b"\x1b[H",
-            "End" => b"\x1b[F",
-            "PageUp" => b"\x1b[5~",
-            "PageDown" => b"\x1b[6~",
-            "Delete" => b"\x1b[3~",
-            "F1" => b"\x1bOP",
-            "F2" => b"\x1bOQ",
-            "F3" => b"\x1bOR",
-            "F4" => b"\x1bOS",
-            "F5" => b"\x1b[15~",
-            "F6" => b"\x1b[17~",
-            "F7" => b"\x1b[18~",
-            "F8" => b"\x1b[19~",
-            "F9" => b"\x1b[20~",
-            "F10" => b"\x1b[21~",
-            "F11" => b"\x1b[23~",
-            "F12" => b"\x1b[24~",
-            "c" if ctrl => b"\x03",
-            "d" if ctrl => b"\x04",
-            "z" if ctrl => b"\x1a",
-            "l" if ctrl => b"\x0c",
-            "u" if ctrl => b"\x15",
-            "k" if ctrl => b"\x0b",
-            _ => return,
-        };
-        self.write_input(bytes);
-    }
 
     pub fn handle_char(&mut self, c: char) {
         let mut buf = [0u8; 4];
