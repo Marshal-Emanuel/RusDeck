@@ -1,6 +1,6 @@
 use egui::{Rect, Color32, Ui, RichText, Sense, Id, Align2, Pos2, ScrollArea, Vec2};
 use crate::theme::Theme;
-use crate::ui::terminal::TerminalWidget;
+use crate::ui::terminal::{TerminalWidget, TerminalTab};
 
 #[derive(Clone, Copy, Default)]
 struct SelectionState {
@@ -8,7 +8,7 @@ struct SelectionState {
     end: Option<(usize, usize)>,
 }
 
-pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: &Theme) {
+pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, active_tab_idx: &mut usize, theme: &Theme) {
     let terminal_id = Id::new("terminal_panel");
     let focused = ui.memory(|m| m.has_focus(terminal_id));
 
@@ -162,29 +162,109 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("⌘ TERMINAL")
+                    RichText::new("⌘ TERMINALS:")
                         .monospace()
                         .size(11.0)
                         .color(theme.low()),
                 );
-                ui.separator();
-                ui.label(
-                    RichText::new("fish")
+                
+                let mut tab_to_close = None;
+                for (idx, tab) in terminals.iter().enumerate() {
+                    ui.add_space(6.0);
+                    let is_active = idx == *active_tab_idx;
+                    
+                    let tab_text = RichText::new(format!(" {}", tab.title))
                         .monospace()
-                        .size(10.0)
-                        .color(theme.dimmed()),
+                        .size(11.0)
+                        .color(if is_active { theme.accent } else { theme.dimmed() });
+                    let resp = ui.selectable_label(is_active, tab_text);
+                    if resp.clicked() {
+                        *active_tab_idx = idx;
+                    }
+
+                    if terminals.len() > 1 {
+                        let close_text = RichText::new("x")
+                            .monospace()
+                            .size(11.0)
+                            .color(if is_active { theme.accent } else { theme.dimmed() });
+                        let close_resp = ui.selectable_label(false, close_text);
+                        if close_resp.clicked() {
+                            tab_to_close = Some(idx);
+                        }
+                    }
+                }
+
+                ui.add_space(10.0);
+                let plus_resp = ui.selectable_label(
+                    false,
+                    RichText::new("[ + ]")
+                        .monospace()
+                        .size(11.0)
+                        .color(theme.high()),
                 );
+                if plus_resp.clicked() {
+                    println!("DEBUG: Plus button clicked! Spawning new terminal...");
+                    match TerminalWidget::new(80, 24, ui.ctx().clone()) {
+                        Some(new_term) => {
+                            println!("DEBUG: Spawning new terminal succeeded!");
+                            let tab_count = terminals.len();
+                            terminals.push(TerminalTab {
+                                title: format!("Term {}", tab_count + 1),
+                                widget: new_term,
+                            });
+                            *active_tab_idx = tab_count;
+                        }
+                        None => {
+                            println!("DEBUG: Spawning new terminal failed!");
+                        }
+                    }
+                }
+
+                if let Some(close_idx) = tab_to_close {
+                    terminals.remove(close_idx);
+                    if *active_tab_idx >= terminals.len() {
+                        *active_tab_idx = terminals.len().saturating_sub(1);
+                    }
+                }
             });
 
             ui.separator();
 
+            if terminals.is_empty() {
+                return;
+            }
+            if *active_tab_idx >= terminals.len() {
+                *active_tab_idx = terminals.len() - 1;
+            }
+
+            let term = &mut terminals[*active_tab_idx].widget;
+
+            let cell_w = 8.5;
+            let cell_h = 17.0;
+            let available_size = ui.available_size();
+            let pad_x = 16.0; // padding + scrollbar
+            let pad_y = 10.0; // padding
+            let cols = (((available_size.x - pad_x) / cell_w).floor() as usize).max(40);
+            let rows = (((available_size.y - pad_y) / cell_h).floor() as usize).max(10);
+
+            term.resize(cols, rows);
+
             let buffer = term.get_buffer();
-            if let Ok(buf_guard) = buffer.lock() {
+            let (total_rows, content_w, buf_width, history_len, cursor_row, cursor_col) = {
+                if let Ok(buf_guard) = buffer.lock() {
+                    let total_rows = buf_guard.history.len() + buf_guard.lines.len();
+                    let content_w = buf_guard.width() as f32 * cell_w;
+                    let (cursor_col, cursor_row) = buf_guard.cursor();
+                    (total_rows, content_w, buf_guard.width(), buf_guard.history.len(), cursor_row, cursor_col)
+                } else {
+                    (0, 0.0, 80, 0, 0, 0)
+                }
+            };
+
+            if total_rows > 0 {
                 let font_size = 13.0;
                 let cell_w = 8.5;
                 let cell_h = 17.0;
-                let total_rows = buf_guard.history.len() + buf_guard.lines.len();
-                let content_w = buf_guard.width() as f32 * cell_w;
 
                 ScrollArea::vertical()
                     .stick_to_bottom(true)
@@ -206,7 +286,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                             if let Some(pos) = ui.input(|i| i.pointer.press_origin()) {
                                 let rel_x = (pos.x - origin.x).max(0.0);
                                 let rel_y = (pos.y - origin.y).max(0.0);
-                                let col = ((rel_x / cell_w) as usize).min(buf_guard.width() - 1);
+                                let col = ((rel_x / cell_w) as usize).min(buf_width - 1);
                                 let row = row_range.start + ((rel_y / cell_h) as usize).min(visible_rows - 1);
                                 selection.start = Some((row, col));
                                 selection.end = Some((row, col));
@@ -215,7 +295,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                             if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
                                 let rel_x = (pos.x - origin.x).max(0.0);
                                 let rel_y = (pos.y - origin.y).max(0.0);
-                                let col = ((rel_x / cell_w) as usize).min(buf_guard.width() - 1);
+                                let col = ((rel_x / cell_w) as usize).min(buf_width - 1);
                                 let row = row_range.start + ((rel_y / cell_h) as usize).min(visible_rows - 1);
                                 selection.end = Some((row, col));
                             }
@@ -230,18 +310,34 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                             Color32::from_rgba_unmultiplied(6, 10, 8, 255),
                         );
 
+                        // Lock briefly to clone only the visible rows
+                        let visible_cells = {
+                            let mut cells = Vec::with_capacity(visible_rows);
+                            if let Ok(buf_guard) = buffer.lock() {
+                                for virtual_row in row_range.clone() {
+                                    let line_cells = if virtual_row < history_len {
+                                        buf_guard.history[virtual_row].clone()
+                                    } else {
+                                        buf_guard.lines[virtual_row - history_len].clone()
+                                    };
+                                    cells.push(line_cells);
+                                }
+                            } else {
+                                for _ in row_range.clone() {
+                                    cells.push(vec![crate::ui::terminal::Cell::default(); buf_width]);
+                                }
+                            }
+                            cells
+                        };
+
                         for virtual_row in row_range.clone() {
                             let local_row = virtual_row - row_range.start;
                             let y = origin.y + local_row as f32 * cell_h;
 
-                            let line_cells = if virtual_row < buf_guard.history.len() {
-                                &buf_guard.history[virtual_row]
-                            } else {
-                                &buf_guard.lines[virtual_row - buf_guard.history.len()]
-                            };
+                            let line_cells = &visible_cells[local_row];
 
                             // Render selection highlight background
-                            for col_idx in 0..buf_guard.width() {
+                            for col_idx in 0..buf_width {
                                 if is_cell_selected(virtual_row, col_idx, selection.start, selection.end) {
                                     let x = origin.x + col_idx as f32 * cell_w;
                                     painter.rect_filled(
@@ -256,83 +352,72 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                             }
 
                             let mut line_end = 0;
-                            for col_idx in (0..buf_guard.width()).rev() {
+                            for col_idx in (0..buf_width).rev() {
                                 if line_cells[col_idx].c != ' ' {
                                     line_end = col_idx + 1;
                                     break;
                                 }
                             }
 
-                            let mut run_str = String::new();
-                            let mut run_start_col = 0;
-                            let mut run_fg = Color32::TRANSPARENT;
-                            let mut run_bold = false;
+                            if line_end > 0 {
+                                let mut job = egui::text::LayoutJob::default();
+                                let mut current_text = String::new();
+                                let mut current_fg = Color32::TRANSPARENT;
+                                let mut current_bold = false;
 
-                            for col_idx in 0..line_end {
-                                let cell = line_cells[col_idx];
-                                if cell.c == ' ' {
-                                    if !run_str.is_empty() {
-                                        let rx = origin.x + run_start_col as f32 * cell_w;
-                                        painter.text(
-                                            Pos2::new(rx, y),
-                                            Align2::LEFT_TOP,
-                                            &run_str,
-                                            egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                            run_fg,
+                                for col_idx in 0..line_end {
+                                    let cell = line_cells[col_idx];
+                                    let fg = if cell.bold {
+                                        Color32::from_rgb(
+                                            (cell.fg[0] as u32 + 40).min(255) as u8,
+                                            (cell.fg[1] as u32 + 40).min(255) as u8,
+                                            (cell.fg[2] as u32 + 40).min(255) as u8,
+                                        )
+                                    } else {
+                                        Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
+                                    };
+
+                                    if current_text.is_empty() {
+                                        current_fg = fg;
+                                        current_bold = cell.bold;
+                                        current_text.push(cell.c);
+                                    } else if fg == current_fg && cell.bold == current_bold {
+                                        current_text.push(cell.c);
+                                    } else {
+                                        job.append(
+                                            &current_text,
+                                            0.0,
+                                            egui::TextFormat {
+                                                font_id: egui::FontId::new(font_size, egui::FontFamily::Monospace),
+                                                color: current_fg,
+                                                ..Default::default()
+                                            },
                                         );
-                                        run_str.clear();
+                                        current_text.clear();
+                                        current_fg = fg;
+                                        current_bold = cell.bold;
+                                        current_text.push(cell.c);
                                     }
-                                    continue;
                                 }
 
-                                let fg = if cell.bold {
-                                    Color32::from_rgb(
-                                        (cell.fg[0] as u32 + 40).min(255) as u8,
-                                        (cell.fg[1] as u32 + 40).min(255) as u8,
-                                        (cell.fg[2] as u32 + 40).min(255) as u8,
-                                    )
-                                } else {
-                                    Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
-                                };
-
-                                if run_str.is_empty() {
-                                    run_start_col = col_idx;
-                                    run_fg = fg;
-                                    run_bold = cell.bold;
-                                    run_str.push(cell.c);
-                                } else if fg == run_fg && cell.bold == run_bold {
-                                    run_str.push(cell.c);
-                                } else {
-                                    let rx = origin.x + run_start_col as f32 * cell_w;
-                                    painter.text(
-                                        Pos2::new(rx, y),
-                                        Align2::LEFT_TOP,
-                                        &run_str,
-                                        egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                        run_fg,
+                                if !current_text.is_empty() {
+                                    job.append(
+                                        &current_text,
+                                        0.0,
+                                        egui::TextFormat {
+                                            font_id: egui::FontId::new(font_size, egui::FontFamily::Monospace),
+                                            color: current_fg,
+                                            ..Default::default()
+                                        },
                                     );
-                                    run_start_col = col_idx;
-                                    run_fg = fg;
-                                    run_bold = cell.bold;
-                                    run_str.clear();
-                                    run_str.push(cell.c);
                                 }
-                            }
 
-                            if !run_str.is_empty() {
-                                let rx = origin.x + run_start_col as f32 * cell_w;
-                                painter.text(
-                                    Pos2::new(rx, y),
-                                    Align2::LEFT_TOP,
-                                    &run_str,
-                                    egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                    run_fg,
-                                );
+                                let galley = painter.layout_job(job);
+                                painter.galley(Pos2::new(origin.x, y), galley, Color32::TRANSPARENT);
                             }
                         }
 
-                        let (cursor_col, cursor_row) = buf_guard.cursor();
-                        let cursor_virtual_row = buf_guard.history.len() + cursor_row;
+                        let cursor_virtual_row = history_len + cursor_row;
                         if cursor_virtual_row >= row_range.start && cursor_virtual_row < row_range.end {
                             let local_cursor_row = cursor_virtual_row - row_range.start;
                             let cursor_x = origin.x + cursor_col as f32 * cell_w;
@@ -356,10 +441,17 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
             }
         });
 
-        let response = ui.interact(rect, terminal_id, Sense::click());
-        if response.clicked() {
+        if ui.input(|i| i.pointer.any_click()) && ui.rect_contains_pointer(rect) {
             ui.memory_mut(|m| m.request_focus(terminal_id));
         }
+
+        if terminals.is_empty() {
+            return;
+        }
+        if *active_tab_idx >= terminals.len() {
+            *active_tab_idx = terminals.len() - 1;
+        }
+        let term = &mut terminals[*active_tab_idx].widget;
 
         if focused {
             let mut needs_repaint = false;
@@ -377,91 +469,19 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                 match event {
                     egui::Event::Key { key, pressed: true, modifiers, .. } => {
                         has_keyboard_input = true;
-                        if modifiers.ctrl {
-                            match key {
-                                egui::Key::C => {
-                                    ctrl_c_pressed = true;
+                        if modifiers.ctrl && *key == egui::Key::C {
+                            ctrl_c_pressed = true;
+                        } else if modifiers.ctrl && *key == egui::Key::V && !modifiers.shift {
+                            if let Some(text) = crate::ui::clipboard::paste_from_clipboard() {
+                                for c in text.chars() {
+                                    term.handle_char(c);
                                 }
-                                egui::Key::D => {
-                                    term.handle_key("d", true);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::Z => {
-                                    term.handle_key("z", true);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::L => {
-                                    term.handle_key("l", true);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::U => {
-                                    term.handle_key("u", true);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::K => {
-                                    term.handle_key("k", true);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::V => {
-                                    if !modifiers.shift {
-                                        if let Some(text) = crate::ui::clipboard::paste_from_clipboard() {
-                                            for c in text.chars() {
-                                                term.handle_char(c);
-                                            }
-                                            needs_repaint = true;
-                                            ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
-                                        }
-                                    }
-                                }
-                                _ => {}
+                                needs_repaint = true;
+                                ui.memory_mut(|m| m.data.insert_temp(selection_id, SelectionState::default()));
                             }
                         } else {
-                            match key {
-                                egui::Key::Enter => {
-                                    term.handle_key("Enter", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::Backspace => {
-                                    term.handle_key("Backspace", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::Tab => {
-                                    term.handle_key("Tab", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::ArrowUp => {
-                                    term.handle_key("ArrowUp", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::ArrowDown => {
-                                    term.handle_key("ArrowDown", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::ArrowLeft => {
-                                    term.handle_key("ArrowLeft", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::ArrowRight => {
-                                    term.handle_key("ArrowRight", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::Home => {
-                                    term.handle_key("Home", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::End => {
-                                    term.handle_key("End", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::Delete => {
-                                    term.handle_key("Delete", false);
-                                    needs_repaint = true;
-                                }
-                                egui::Key::Escape => {
-                                    term.handle_key("Escape", false);
-                                    needs_repaint = true;
-                                }
-                                _ => {}
+                            if handle_keyboard_event(term, *key, *modifiers) {
+                                needs_repaint = true;
                             }
                         }
                     }
@@ -493,7 +513,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, term: &mut TerminalWidget, theme: 
                 if has_selection {
                     trigger_copy = true;
                 } else {
-                    term.handle_key("c", true);
+                    let _ = handle_keyboard_event(term, egui::Key::C, egui::Modifiers { ctrl: true, ..Default::default() });
                     needs_repaint = true;
                 }
             }
@@ -595,6 +615,277 @@ fn get_selected_text(
         }
     }
     text
+}
+
+fn handle_keyboard_event(term: &mut crate::ui::terminal::TerminalWidget, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    let mut bytes = Vec::new();
+
+    let mut modifier_code = 1;
+    if modifiers.shift { modifier_code += 1; }
+    if modifiers.alt { modifier_code += 2; }
+    if modifiers.ctrl { modifier_code += 4; }
+
+    let letter_char = match key {
+        egui::Key::A => Some('a'),
+        egui::Key::B => Some('b'),
+        egui::Key::C => Some('c'),
+        egui::Key::D => Some('d'),
+        egui::Key::E => Some('e'),
+        egui::Key::F => Some('f'),
+        egui::Key::G => Some('g'),
+        egui::Key::H => Some('h'),
+        egui::Key::I => Some('i'),
+        egui::Key::J => Some('j'),
+        egui::Key::K => Some('k'),
+        egui::Key::L => Some('l'),
+        egui::Key::M => Some('m'),
+        egui::Key::N => Some('n'),
+        egui::Key::O => Some('o'),
+        egui::Key::P => Some('p'),
+        egui::Key::Q => Some('q'),
+        egui::Key::R => Some('r'),
+        egui::Key::S => Some('s'),
+        egui::Key::T => Some('t'),
+        egui::Key::U => Some('u'),
+        egui::Key::V => Some('v'),
+        egui::Key::W => Some('w'),
+        egui::Key::X => Some('x'),
+        egui::Key::Y => Some('y'),
+        egui::Key::Z => Some('z'),
+        _ => None,
+    };
+
+    if modifiers.ctrl && !modifiers.alt {
+        if let Some(c) = letter_char {
+            bytes.push(c as u8 - b'a' + 1);
+        } else {
+            match key {
+                egui::Key::ArrowUp => bytes.extend_from_slice(b"\x1b[1;5A"),
+                egui::Key::ArrowDown => bytes.extend_from_slice(b"\x1b[1;5B"),
+                egui::Key::ArrowRight => bytes.extend_from_slice(b"\x1b[1;5C"),
+                egui::Key::ArrowLeft => bytes.extend_from_slice(b"\x1b[1;5D"),
+                egui::Key::Home => bytes.extend_from_slice(b"\x1b[1;5H"),
+                egui::Key::End => bytes.extend_from_slice(b"\x1b[1;5F"),
+                egui::Key::Delete => bytes.extend_from_slice(b"\x1b[3;5~"),
+                egui::Key::PageUp => bytes.extend_from_slice(b"\x1b[5;5~"),
+                egui::Key::PageDown => bytes.extend_from_slice(b"\x1b[6;5~"),
+                egui::Key::Backspace => bytes.push(0x08),
+                egui::Key::Tab => bytes.extend_from_slice(b"\x1b[Z"),
+                _ => return false,
+            }
+        }
+    } else if modifiers.alt && !modifiers.ctrl {
+        if let Some(c) = letter_char {
+            bytes.push(0x1b);
+            bytes.push(c as u8);
+        } else {
+            match key {
+                egui::Key::ArrowUp => bytes.extend_from_slice(b"\x1b[1;3A"),
+                egui::Key::ArrowDown => bytes.extend_from_slice(b"\x1b[1;3B"),
+                egui::Key::ArrowRight => bytes.extend_from_slice(b"\x1b[1;3C"),
+                egui::Key::ArrowLeft => bytes.extend_from_slice(b"\x1b[1;3D"),
+                egui::Key::Home => bytes.extend_from_slice(b"\x1b[1;3H"),
+                egui::Key::End => bytes.extend_from_slice(b"\x1b[1;3F"),
+                egui::Key::Delete => bytes.extend_from_slice(b"\x1b[3;3~"),
+                egui::Key::PageUp => bytes.extend_from_slice(b"\x1b[5;3~"),
+                egui::Key::PageDown => bytes.extend_from_slice(b"\x1b[6;3~"),
+                egui::Key::Escape => bytes.extend_from_slice(b"\x1b\x1b"),
+                egui::Key::Backspace => bytes.extend_from_slice(b"\x1b\x7f"),
+                egui::Key::Enter => bytes.extend_from_slice(b"\x1b\r"),
+                _ => return false,
+            }
+        }
+    } else if modifiers.ctrl && modifiers.alt {
+        if let Some(c) = letter_char {
+            bytes.push(0x1b);
+            bytes.push(c as u8 - b'a' + 1);
+        } else {
+            match key {
+                egui::Key::ArrowUp => bytes.extend_from_slice(b"\x1b[1;7A"),
+                egui::Key::ArrowDown => bytes.extend_from_slice(b"\x1b[1;7B"),
+                egui::Key::ArrowRight => bytes.extend_from_slice(b"\x1b[1;7C"),
+                egui::Key::ArrowLeft => bytes.extend_from_slice(b"\x1b[1;7D"),
+                _ => return false,
+            }
+        }
+    } else {
+        match key {
+            egui::Key::ArrowUp => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}A", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[A");
+                }
+            }
+            egui::Key::ArrowDown => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}B", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[B");
+                }
+            }
+            egui::Key::ArrowRight => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}C", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[C");
+                }
+            }
+            egui::Key::ArrowLeft => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}D", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[D");
+                }
+            }
+            egui::Key::Home => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}H", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[H");
+                }
+            }
+            egui::Key::End => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}F", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[F");
+                }
+            }
+            egui::Key::PageUp => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[5;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[5~");
+                }
+            }
+            egui::Key::PageDown => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[6;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[6~");
+                }
+            }
+            egui::Key::Insert => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[2;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[2~");
+                }
+            }
+            egui::Key::Delete => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[3;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[3~");
+                }
+            }
+            egui::Key::Escape => bytes.push(0x1b),
+            egui::Key::Tab => {
+                if modifiers.shift {
+                    bytes.extend_from_slice(b"\x1b[Z");
+                } else {
+                    bytes.push(0x09);
+                }
+            }
+            egui::Key::Enter => bytes.push(b'\r'),
+            egui::Key::Backspace => bytes.push(0x7f),
+            
+            egui::Key::F1 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}P", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1bOP");
+                }
+            }
+            egui::Key::F2 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}Q", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1bOQ");
+                }
+            }
+            egui::Key::F3 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}R", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1bOR");
+                }
+            }
+            egui::Key::F4 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[1;{}S", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1bOS");
+                }
+            }
+            egui::Key::F5 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[15;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[15~");
+                }
+            }
+            egui::Key::F6 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[17;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[17~");
+                }
+            }
+            egui::Key::F7 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[18;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[18~");
+                }
+            }
+            egui::Key::F8 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[19;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[19~");
+                }
+            }
+            egui::Key::F9 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[20;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[20~");
+                }
+            }
+            egui::Key::F10 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[21;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[21~");
+                }
+            }
+            egui::Key::F11 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[23;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[23~");
+                }
+            }
+            egui::Key::F12 => {
+                if modifier_code > 1 {
+                    bytes.extend(format!("\x1b[24;{}~", modifier_code).into_bytes());
+                } else {
+                    bytes.extend_from_slice(b"\x1b[24~");
+                }
+            }
+            
+            _ => return false,
+        }
+    }
+
+    if !bytes.is_empty() {
+        term.write_input(&bytes);
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]
