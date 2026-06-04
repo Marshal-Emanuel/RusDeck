@@ -8,7 +8,7 @@ pub mod temp;
 
 use std::thread;
 use std::time::{Duration, Instant};
-use std::sync::{Arc, RwLock, mpsc::Sender};
+use std::sync::{Arc, RwLock};
 use sysinfo::{System, Networks, CpuRefreshKind, Disks, Components};
 
 use crate::app::{AppState, HISTORY_MAX, ProcessInfo, LogLine};
@@ -21,7 +21,7 @@ const REFRESH_NETWORK: u64 = 1;
 const REFRESH_PROCESSES: u64 = 2;
 const REFRESH_LOGS: u64 = 10; // Log checks changed to 10 seconds to drastically reduce CPU overhead
 
-pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>) {
+pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, ctx: egui::Context) {
     let mut log_buffer = logs::LogBuffer::new(200);
     let mut temp_monitor = temp::TempMonitor::new();
 
@@ -189,7 +189,7 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, repaint_tx: Sender<()>
             }
 
             if state_changed {
-                let _ = repaint_tx.send(());
+                ctx.request_repaint();
             }
 
             thread::sleep(Duration::from_millis(200));
