@@ -186,6 +186,7 @@ fn draw_waveform(painter: &Painter, rect: Rect, history: &std::collections::VecD
     let pts: Vec<Pos2> = history.iter().enumerate().map(|(i, &v)| {
         let x = g_rect.left() + (i as f32 / (n - 1.0)) * g_rect.width();
         let y = g_rect.bottom() - (v / 100.0).min(1.0) * g_rect.height();
+        let y = y.clamp(g_rect.top() + 1.0, g_rect.bottom() - 1.0);
         Pos2::new(x, y)
     }).collect();
 
