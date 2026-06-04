@@ -6,7 +6,7 @@ mod ui;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use app::AppState;
-use theme::Theme;
+use theme::{Theme, ThemeVariant};
 use ui::background::BackgroundCache;
 use ui::terminal::{TerminalWidget, TerminalTab};
 use ui::panels::filesystem::FileExplorerState;
@@ -40,12 +40,14 @@ fn main() -> eframe::Result<()> {
 
             Box::new(RusDeckApp {
                 state,
-                theme: Theme::default_white(),
+                theme_variant: ThemeVariant::Default,
+                theme: Theme::from_variant(ThemeVariant::Default),
                 bg_cache: BackgroundCache::new(),
                 terminals,
                 active_terminal_idx: 0,
                 file_explorer: FileExplorerState::new(),
                 cursor_timer: Instant::now(),
+                show_theme_panel: false,
             })
         }),
     )
@@ -53,12 +55,14 @@ fn main() -> eframe::Result<()> {
 
 struct RusDeckApp {
     state: Arc<RwLock<AppState>>,
+    theme_variant: ThemeVariant,
     theme: Theme,
     bg_cache: BackgroundCache,
     terminals: Vec<TerminalTab>,
     active_terminal_idx: usize,
     file_explorer: FileExplorerState,
     cursor_timer: Instant,
+    show_theme_panel: bool,
 }
 
 impl eframe::App for RusDeckApp {
@@ -121,7 +125,9 @@ impl eframe::App for RusDeckApp {
             ui::draw(
                 ctx,
                 &state,
-                &self.theme,
+                &mut self.theme,
+                &mut self.theme_variant,
+                &mut self.show_theme_panel,
                 &mut self.bg_cache,
                 &mut self.terminals,
                 &mut self.active_terminal_idx,
