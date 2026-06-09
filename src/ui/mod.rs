@@ -366,9 +366,19 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
                 );
             }
 
-            // Color dot
-            let dot_pos = Pos2::new(item_rect.left() + 16.0, item_rect.center().y);
-            painter.circle_filled(dot_pos, 5.0, preview_color);
+            // Color parallelogram (slanted to match chamfer style)
+            let dot_cx = item_rect.left() + 16.0;
+            let dot_cy = item_rect.center().y;
+            let dw = 5.0;
+            let dh = 6.0;
+            let skew = 2.0;
+            let dot_pts = vec![
+                Pos2::new(dot_cx - dw + skew, dot_cy - dh),
+                Pos2::new(dot_cx + dw + skew, dot_cy - dh),
+                Pos2::new(dot_cx + dw - skew, dot_cy + dh),
+                Pos2::new(dot_cx - dw - skew, dot_cy + dh),
+            ];
+            painter.add(egui::Shape::convex_polygon(dot_pts, preview_color, egui::Stroke::NONE));
 
             // Name
             let v_name_color = if is_active { theme.accent } else { theme.high() };
