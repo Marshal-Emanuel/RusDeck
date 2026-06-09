@@ -205,9 +205,10 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
             });
 
             // ── Bottom-right floating gear ──
-            let gear_pad = 16.0;
+            let gear_pad_x = 16.0;
+            let gear_pad_y = 32.0;
             let gear_size = 36.0;
-            let gear_pos = Pos2::new(screen_w - gear_pad - gear_size, screen_h - gear_pad - gear_size);
+            let gear_pos = Pos2::new(screen_w - gear_pad_x - gear_size, screen_h - gear_pad_y - gear_size);
             let gear_rect = Rect::from_min_size(gear_pos, Vec2::splat(gear_size));
             let gear_id = egui::Id::new("gear_btn");
             let gear_resp = ui.interact(gear_rect, gear_id, egui::Sense::click());
@@ -215,7 +216,6 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
             let gear_color = if gear_hovered { theme.accent } else { theme.accent.linear_multiply(0.5) };
 
             let gp = ui.painter_at(gear_rect);
-            gp.rect_stroke(gear_rect.shrink(1.0), Rounding::same(5.0), Stroke::new(1.5, if gear_hovered { theme.accent } else { theme.mid() }));
             gp.text(gear_rect.center(), Align2::CENTER_CENTER, "\u{2699}", egui::FontId::new(18.0, egui::FontFamily::Monospace), gear_color);
 
             let mut gear_clicked = false;
