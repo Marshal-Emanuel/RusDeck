@@ -75,7 +75,7 @@ pub fn setup_visuals(ctx: &egui::Context) {
 
 pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_variant: &mut ThemeVariant, show_theme_panel: &mut bool, bg_cache: &mut BackgroundCache, terminals: &mut Vec<TerminalTab>, active_terminal_idx: &mut usize, file_explorer: &mut panels::filesystem::FileExplorerState) -> Option<std::path::PathBuf> {
     let mut dir_change = None;
-    egui::Area::new("root".into())
+    let gear_clicked = egui::Area::new("root".into())
         .fixed_pos(Pos2::new(0.0, 0.0))
         .show(ctx, |ui| {
             let avail = ui.available_rect_before_wrap();
@@ -160,13 +160,11 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
                 });
             });
 
-            // 3. Right-aligned region for Settings and Close Button
+            // 3. Right-aligned region for Close Button only
             let right_rect = Rect::from_min_max(
                 Pos2::new(tb.center().x + 100.0, tb.min.y),
                 tb.max
             );
-            let mut gear_rect = Rect::NOTHING;
-            let mut gear_clicked = false;
             ui.allocate_ui_at_rect(right_rect, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
@@ -203,148 +201,163 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
                     if exit_resp.clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
-
-                    ui.add_space(6.0);
-
-                    // Settings gear button
-                    let gear_size = 32.0;
-                    let (gear_resp, gear_painter) = ui.allocate_painter(Vec2::new(gear_size, 24.0), egui::Sense::click());
-                    let gear_hovered = gear_resp.hovered();
-                    let gear_color = if *show_theme_panel {
-                        theme.accent
-                    } else if gear_hovered {
-                        theme.accent
-                    } else {
-                        theme.accent.linear_multiply(0.6)
-                    };
-
-                    gear_painter.rect_stroke(
-                        gear_resp.rect.shrink(1.0),
-                        0.0,
-                        Stroke::new(1.0, if gear_hovered || *show_theme_panel { theme.accent } else { theme.mid() }),
-                    );
-
-                    gear_painter.text(
-                        gear_resp.rect.center(),
-                        Align2::CENTER_CENTER,
-                        "\u{2699}",
-                        egui::FontId::new(15.0, egui::FontFamily::Monospace),
-                        gear_color,
-                    );
-
-                    if gear_resp.clicked() {
-                        *show_theme_panel = !*show_theme_panel;
-                        gear_clicked = true;
-                    }
-
-                    gear_rect = gear_resp.rect;
                 });
             });
 
-            // Theme picker dropdown
-            if *show_theme_panel {
-                let dropdown_w = 220.0;
-                let item_h = 30.0;
-                let dd_h = ALL_THEMES.len() as f32 * item_h + 12.0;
-                let dd_left = gear_rect.left() - dropdown_w + gear_rect.width();
-                let dd_top = gear_rect.bottom() + 4.0;
+            // ── Bottom-right floating gear ──
+            let gear_pad = 16.0;
+            let gear_size = 36.0;
+            let gear_pos = Pos2::new(screen_w - gear_pad - gear_size, screen_h - gear_pad - gear_size);
+            let gear_rect = Rect::from_min_size(gear_pos, Vec2::splat(gear_size));
+            let gear_id = egui::Id::new("gear_btn");
+            let gear_resp = ui.interact(gear_rect, gear_id, egui::Sense::click());
+            let gear_hovered = gear_resp.hovered() || *show_theme_panel;
+            let gear_color = if gear_hovered { theme.accent } else { theme.accent.linear_multiply(0.5) };
 
-                let dd_rect = Rect::from_min_max(
-                    Pos2::new(dd_left, dd_top),
-                    Pos2::new(dd_left + dropdown_w, dd_top + dd_h),
+            let gp = ui.painter_at(gear_rect);
+            gp.rect_stroke(gear_rect.shrink(1.0), Rounding::same(5.0), Stroke::new(1.5, if gear_hovered { theme.accent } else { theme.mid() }));
+            gp.text(gear_rect.center(), Align2::CENTER_CENTER, "\u{2699}", egui::FontId::new(18.0, egui::FontFamily::Monospace), gear_color);
+
+            let mut gear_clicked = false;
+            if gear_resp.clicked() {
+                *show_theme_panel = !*show_theme_panel;
+                gear_clicked = true;
+            }
+
+            gear_clicked
+        }).inner;
+
+    // ── Settings modal (outside root Area for proper screen-center positioning) ──
+    if *show_theme_panel {
+        let screen = ctx.screen_rect();
+        let modal_w = 260.0;
+        let item_h = 32.0;
+        let header_h = 40.0;
+        let content_pad = 14.0;
+        let inner_h = ALL_THEMES.len() as f32 * item_h;
+        let modal_h = header_h + content_pad * 2.0 + inner_h;
+
+        let modal_pos = Pos2::new(
+            (screen.width() - modal_w) / 2.0,
+            (screen.height() - modal_h) / 2.0,
+        );
+
+        let settings_id = egui::Id::new("settings_modal");
+        let settings_layer = egui::LayerId::new(egui::Order::Foreground, settings_id);
+        let painter = egui::Painter::new(ctx.clone(), settings_layer, screen);
+
+        // Full-screen overlay
+        painter.rect_filled(screen, Rounding::ZERO, Color32::from_black_alpha(140));
+
+        // Panel rect in screen coords
+        let panel_rect = Rect::from_min_size(modal_pos, egui::vec2(modal_w, modal_h));
+
+        // Glass-morphism background
+        painter.rect_filled(panel_rect, Rounding::same(8.0), Color32::from_rgba_premultiplied(0, 0, 0, 210));
+        // Accent glow border
+        painter.rect_stroke(panel_rect, Rounding::same(8.0), Stroke::new(1.5, theme.accent));
+        // Inner subtle border
+        painter.rect_stroke(panel_rect.shrink(2.0), Rounding::same(6.0), Stroke::new(1.0, theme.mid()));
+
+        // Header area
+        let header_rect = Rect::from_min_size(
+            modal_pos + egui::vec2(content_pad, content_pad),
+            egui::vec2(modal_w - content_pad * 2.0, header_h),
+        );
+        painter.text(
+            Pos2::new(header_rect.left(), header_rect.center().y),
+            Align2::LEFT_CENTER,
+            "SETTINGS",
+            egui::FontId::new(15.0, egui::FontFamily::Name("Orbitron".into())),
+            theme.high(),
+        );
+
+        // Close button
+        let close_btn_size = 24.0;
+        let close_btn_rect = Rect::from_min_size(
+            modal_pos + egui::vec2(modal_w - content_pad - close_btn_size, content_pad + (header_h - close_btn_size) / 2.0),
+            Vec2::splat(close_btn_size),
+        );
+        let pointer_pos = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(Pos2::ZERO);
+        let close_hov = close_btn_rect.contains(pointer_pos);
+        let close_clicked = close_hov && ctx.input(|i| i.pointer.any_click());
+        painter.rect_stroke(close_btn_rect, Rounding::same(3.0), Stroke::new(1.0, if close_hov { Color32::from_rgb(255, 80, 80) } else { theme.mid() }));
+        painter.text(close_btn_rect.center(), Align2::CENTER_CENTER, "X", egui::FontId::new(13.0, egui::FontFamily::Monospace), if close_hov { Color32::from_rgb(255, 80, 80) } else { theme.low() });
+        if close_clicked {
+            *show_theme_panel = false;
+        }
+
+        // Theme selection list
+        for (i, variant) in ALL_THEMES.iter().enumerate() {
+            let is_active = *variant == *theme_variant;
+            let preview_color = variant.preview();
+            let variant_name = variant.name();
+
+            let item_y = modal_pos.y + header_h + content_pad * 1.5 + i as f32 * item_h;
+            let item_rect = Rect::from_min_size(
+                Pos2::new(modal_pos.x + content_pad, item_y),
+                egui::vec2(modal_w - content_pad * 2.0, item_h),
+            );
+
+            let item_hovered = item_rect.contains(pointer_pos);
+            let item_clicked = item_hovered && ctx.input(|i| i.pointer.any_click());
+
+            // Hover background
+            let is_hovered = item_hovered;
+            let v_bg = if is_hovered { theme.faint() } else if is_active { theme.background.linear_multiply(1.3) } else { Color32::TRANSPARENT };
+            if v_bg != Color32::TRANSPARENT {
+                painter.rect_filled(item_rect, Rounding::same(4.0), v_bg);
+            }
+
+            // Active indicator bar
+            if is_active {
+                painter.rect_filled(
+                    Rect::from_min_size(Pos2::new(item_rect.left(), item_rect.top() + 2.0), egui::vec2(3.0, item_rect.height() - 4.0)),
+                    Rounding::same(1.5),
+                    theme.accent,
                 );
+            }
 
-                let dd_area_id = egui::Id::new("theme_dropdown");
-                let dd_res = egui::Area::new(dd_area_id)
-                    .fixed_pos(dd_rect.min)
-                    .movable(false)
-                    .show(ctx, |ui| {
-                        let panel_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(dropdown_w, dd_h));
-                        let panel_painter = ui.painter_at(panel_rect);
+            // Color dot
+            let dot_pos = Pos2::new(item_rect.left() + 16.0, item_rect.center().y);
+            painter.circle_filled(dot_pos, 5.0, preview_color);
 
-                        panel_painter.rect_filled(panel_rect, Rounding::same(4.0), theme.background);
-                        panel_painter.rect_stroke(panel_rect, Rounding::same(4.0), Stroke::new(1.0, theme.mid()));
+            // Name
+            let v_name_color = if is_active { theme.accent } else { theme.high() };
+            painter.text(
+                Pos2::new(item_rect.left() + 30.0, item_rect.center().y),
+                Align2::LEFT_CENTER,
+                variant_name,
+                egui::FontId::new(13.0, egui::FontFamily::Monospace),
+                v_name_color,
+            );
 
-                        ui.allocate_ui_at_rect(panel_rect.shrink2(egui::vec2(8.0, 6.0)), |ui| {
-                            ui.vertical(|ui| {
-                                for variant in ALL_THEMES {
-                                    let is_active = variant == theme_variant;
-                                    let preview_color = variant.preview();
-                                    let variant_name = variant.name();
+            if is_active {
+                painter.text(
+                    Pos2::new(item_rect.right() - 8.0, item_rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    "\u{2713}",
+                    egui::FontId::new(12.0, egui::FontFamily::Monospace),
+                    theme.accent,
+                );
+            }
 
-                                    let item_resp = ui.allocate_rect(
-                                        Rect::from_min_size(
-                                            ui.cursor().min,
-                                            egui::vec2(dropdown_w - 16.0, item_h),
-                                        ),
-                                        egui::Sense::click(),
-                                    );
-                                    let item_rect = item_resp.rect;
-
-                                    let item_bg = if item_rect.contains(ui.input(|i| i.pointer.latest_pos().unwrap_or(Pos2::ZERO))) {
-                                        theme.faint()
-                                    } else {
-                                        Color32::TRANSPARENT
-                                    };
-                                    if item_bg != Color32::TRANSPARENT {
-                                        let item_painter = ui.painter_at(item_rect);
-                                        item_painter.rect_filled(item_rect, Rounding::same(3.0), item_bg);
-                                    }
-
-                                    let dot_size = 8.0;
-                                    let dot_pos = Pos2::new(item_rect.left() + 6.0, item_rect.center().y);
-                                    let dot_stroke = if is_active {
-                                        Stroke::new(2.0, theme.high())
-                                    } else {
-                                        Stroke::NONE
-                                    };
-                                    if dot_stroke.width > 0.0 {
-                                        ui.painter_at(item_rect).circle(dot_pos, dot_size / 2.0 + 1.5, Color32::TRANSPARENT, dot_stroke);
-                                    }
-                                    ui.painter_at(item_rect).circle_filled(dot_pos, dot_size / 2.0, preview_color);
-
-                                    let name_color = if is_active { theme.accent } else { theme.high() };
-                                    let label_pos = Pos2::new(item_rect.left() + 22.0, item_rect.center().y);
-                                    ui.painter_at(item_rect).text(
-                                        label_pos,
-                                        Align2::LEFT_CENTER,
-                                        variant_name,
-                                        egui::FontId::new(13.0, egui::FontFamily::Monospace),
-                                        name_color,
-                                    );
-
-                                    if is_active {
-                                        ui.painter_at(item_rect).text(
-                                            Pos2::new(item_rect.right() - 6.0, item_rect.center().y),
-                                            Align2::RIGHT_CENTER,
-                                            "\u{2713}",
-                                            egui::FontId::new(12.0, egui::FontFamily::Monospace),
-                                            theme.low(),
-                                        );
-                                    }
-
-                                    if item_rect.contains(ui.input(|i| i.pointer.latest_pos().unwrap_or(Pos2::ZERO)))
-                                        && ui.input(|i| i.pointer.any_click())
-                                    {
-                                        if *theme_variant != *variant {
-                                            *theme_variant = *variant;
-                                            *theme = Theme::from_variant(*variant);
-                                            *bg_cache = BackgroundCache::new();
-                                        }
-                                    }
-
-                                    ui.add_space(0.0);
-                                }
-                            });
-                        });
-                    });
-
-                // Close dropdown if click outside (but not on the gear button itself)
-                if dd_res.response.clicked_elsewhere() && !gear_clicked {
-                    *show_theme_panel = false;
+            if item_clicked {
+                if *theme_variant != *variant {
+                    *theme_variant = *variant;
+                    *theme = Theme::from_variant(*variant);
+                    *bg_cache = BackgroundCache::new();
                 }
             }
-        });
-        
+        }
+
+        // Click outside modal to close
+        let bg_clicked = ctx.input(|i| i.pointer.any_click());
+        let clicking_outside = bg_clicked && !panel_rect.contains(pointer_pos);
+        if clicking_outside && !gear_clicked {
+            *show_theme_panel = false;
+        }
+    }
+
     dir_change
 }
