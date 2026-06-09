@@ -1,4 +1,6 @@
 use egui::Color32;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ThemeVariant {
@@ -24,6 +26,18 @@ impl ThemeVariant {
         }
     }
 
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "Dracula" => ThemeVariant::Dracula,
+            "Nord" => ThemeVariant::Nord,
+            "Tokyo Night" => ThemeVariant::TokyoNight,
+            "Monokai" => ThemeVariant::Monokai,
+            "Catppuccin Mocha" => ThemeVariant::CatppuccinMocha,
+            "One Dark" => ThemeVariant::OneDark,
+            _ => ThemeVariant::Default,
+        }
+    }
+
     pub fn preview(&self) -> Color32 {
         match self {
             ThemeVariant::Default => Color32::from_rgb(214, 226, 230),
@@ -35,6 +49,32 @@ impl ThemeVariant {
             ThemeVariant::OneDark => Color32::from_rgb(97, 175, 239),
         }
     }
+}
+
+fn config_dir() -> PathBuf {
+    dirs_or_home().join(".config").join("rusdeck")
+}
+
+fn dirs_or_home() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn theme_file() -> PathBuf {
+    config_dir().join("theme")
+}
+
+pub fn save_theme(variant: ThemeVariant) {
+    let _ = fs::create_dir_all(config_dir());
+    let _ = fs::write(theme_file(), variant.name());
+}
+
+pub fn load_theme() -> ThemeVariant {
+    fs::read_to_string(theme_file())
+        .ok()
+        .map(|s| ThemeVariant::from_name(s.trim()))
+        .unwrap_or(ThemeVariant::Default)
 }
 
 pub const ALL_THEMES: &[ThemeVariant] = &[

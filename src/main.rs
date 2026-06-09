@@ -6,7 +6,7 @@ mod ui;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use app::AppState;
-use theme::{Theme, ThemeVariant};
+use theme::{Theme, ThemeVariant, load_theme};
 use ui::background::BackgroundCache;
 use ui::terminal::{TerminalWidget, TerminalTab};
 use ui::panels::filesystem::FileExplorerState;
@@ -38,10 +38,11 @@ fn main() -> eframe::Result<()> {
                 widget: terminal,
             }];
 
+            let saved_theme = load_theme();
             Box::new(RusDeckApp {
                 state,
-                theme_variant: ThemeVariant::Default,
-                theme: Theme::from_variant(ThemeVariant::Default),
+                theme_variant: saved_theme,
+                theme: Theme::from_variant(saved_theme),
                 bg_cache: BackgroundCache::new(),
                 terminals,
                 active_terminal_idx: 0,

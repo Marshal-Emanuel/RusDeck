@@ -395,6 +395,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
                     *theme_variant = *variant;
                     *theme = Theme::from_variant(*variant);
                     *bg_cache = BackgroundCache::new();
+                    crate::theme::save_theme(*variant);
                 }
             }
         }
