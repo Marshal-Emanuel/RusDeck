@@ -230,7 +230,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
     // ── Settings modal (outside root Area for proper screen-center positioning) ──
     if *show_theme_panel {
         let screen = ctx.screen_rect();
-        let modal_w = 260.0;
+        let modal_w = 380.0;
         let item_h = 32.0;
         let header_h = 40.0;
         let content_pad = 14.0;
@@ -253,12 +253,16 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
         let panel_rect = Rect::from_min_size(modal_pos, egui::vec2(modal_w, modal_h));
         let clip = 12.0_f32;
 
-        // Chamfered polygon (asymmetric: top-right + bottom-left)
+        // Chamfered polygon (asymmetric: top-right + bottom-left, with step at bottom-right)
+        let step_h = 24.0;
+        let step_x = panel_rect.right() - 120.0;
         let chamfer_points = vec![
             Pos2::new(panel_rect.left(), panel_rect.top()),
             Pos2::new(panel_rect.right() - clip, panel_rect.top()),
             Pos2::new(panel_rect.right(), panel_rect.top() + clip),
-            Pos2::new(panel_rect.right(), panel_rect.bottom()),
+            Pos2::new(panel_rect.right(), panel_rect.bottom() - step_h),
+            Pos2::new(step_x, panel_rect.bottom() - step_h),
+            Pos2::new(step_x - step_h, panel_rect.bottom()),
             Pos2::new(panel_rect.left() + clip, panel_rect.bottom()),
             Pos2::new(panel_rect.left(), panel_rect.bottom() - clip),
         ];
