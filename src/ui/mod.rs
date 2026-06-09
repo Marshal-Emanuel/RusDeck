@@ -251,51 +251,79 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
 
         // Panel rect in screen coords
         let panel_rect = Rect::from_min_size(modal_pos, egui::vec2(modal_w, modal_h));
+        let clip = 12.0_f32;
 
-        // Glass-morphism background
-        painter.rect_filled(panel_rect, Rounding::same(8.0), Color32::from_rgba_premultiplied(0, 0, 0, 210));
-        // Accent glow border
-        painter.rect_stroke(panel_rect, Rounding::same(8.0), Stroke::new(1.5, theme.accent));
-        // Inner subtle border
-        painter.rect_stroke(panel_rect.shrink(2.0), Rounding::same(6.0), Stroke::new(1.0, theme.mid()));
+        // Chamfered polygon (asymmetric: top-right + bottom-left)
+        let chamfer_points = vec![
+            Pos2::new(panel_rect.left(), panel_rect.top()),
+            Pos2::new(panel_rect.right() - clip, panel_rect.top()),
+            Pos2::new(panel_rect.right(), panel_rect.top() + clip),
+            Pos2::new(panel_rect.right(), panel_rect.bottom()),
+            Pos2::new(panel_rect.left() + clip, panel_rect.bottom()),
+            Pos2::new(panel_rect.left(), panel_rect.bottom() - clip),
+        ];
+        let fill = Color32::from_rgba_unmultiplied(6, 10, 8, 255);
+        painter.add(egui::Shape::convex_polygon(chamfer_points.clone(), fill, egui::Stroke::NONE));
+        painter.add(egui::Shape::closed_line(chamfer_points, egui::Stroke::new(1.0, theme.low())));
 
-        // Header area
-        let header_rect = Rect::from_min_size(
-            modal_pos + egui::vec2(content_pad, content_pad),
-            egui::vec2(modal_w - content_pad * 2.0, header_h),
+        // Neon accent brackets at chamfer corners
+        let thick_stroke = egui::Stroke::new(2.5, theme.accent);
+        // Top-Right Bracket
+        painter.add(egui::Shape::line(vec![
+            Pos2::new(panel_rect.right() - clip - 12.0, panel_rect.top()),
+            Pos2::new(panel_rect.right() - clip, panel_rect.top()),
+            Pos2::new(panel_rect.right(), panel_rect.top() + clip),
+            Pos2::new(panel_rect.right(), panel_rect.top() + clip + 12.0),
+        ], thick_stroke));
+        // Bottom-Left Bracket
+        painter.add(egui::Shape::line(vec![
+            Pos2::new(panel_rect.left() + clip + 12.0, panel_rect.bottom()),
+            Pos2::new(panel_rect.left() + clip, panel_rect.bottom()),
+            Pos2::new(panel_rect.left(), panel_rect.bottom() - clip),
+            Pos2::new(panel_rect.left(), panel_rect.bottom() - clip - 12.0),
+        ], thick_stroke));
+
+        // Dot indicator
+        painter.rect_filled(
+            Rect::from_min_size(Pos2::new(panel_rect.left() + clip + 4.0, panel_rect.top() + 15.0), egui::vec2(4.0, 4.0)),
+            0.0,
+            theme.accent,
         );
+
+        // Label
         painter.text(
-            Pos2::new(header_rect.left(), header_rect.center().y),
-            Align2::LEFT_CENTER,
+            Pos2::new(panel_rect.left() + clip + 14.0, panel_rect.top() + 10.0),
+            Align2::LEFT_TOP,
             "SETTINGS",
-            egui::FontId::new(15.0, egui::FontFamily::Name("Orbitron".into())),
+            egui::FontId::new(14.0, egui::FontFamily::Monospace),
             theme.high(),
         );
 
         // Close button
-        let close_btn_size = 24.0;
+        let close_btn_size = 22.0;
         let close_btn_rect = Rect::from_min_size(
-            modal_pos + egui::vec2(modal_w - content_pad - close_btn_size, content_pad + (header_h - close_btn_size) / 2.0),
+            Pos2::new(panel_rect.right() - content_pad - close_btn_size, panel_rect.top() + 8.0),
             Vec2::splat(close_btn_size),
         );
         let pointer_pos = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(Pos2::ZERO);
         let close_hov = close_btn_rect.contains(pointer_pos);
         let close_clicked = close_hov && ctx.input(|i| i.pointer.any_click());
-        painter.rect_stroke(close_btn_rect, Rounding::same(3.0), Stroke::new(1.0, if close_hov { Color32::from_rgb(255, 80, 80) } else { theme.mid() }));
+        painter.rect_stroke(close_btn_rect, egui::Rounding::same(3.0), egui::Stroke::new(1.0, if close_hov { Color32::from_rgb(255, 80, 80) } else { theme.mid() }));
         painter.text(close_btn_rect.center(), Align2::CENTER_CENTER, "X", egui::FontId::new(13.0, egui::FontFamily::Monospace), if close_hov { Color32::from_rgb(255, 80, 80) } else { theme.low() });
         if close_clicked {
             *show_theme_panel = false;
         }
 
         // Theme selection list
+        let list_top = panel_rect.top() + header_h;
         for (i, variant) in ALL_THEMES.iter().enumerate() {
             let is_active = *variant == *theme_variant;
             let preview_color = variant.preview();
             let variant_name = variant.name();
 
-            let item_y = modal_pos.y + header_h + content_pad * 1.5 + i as f32 * item_h;
+            let item_y = list_top + i as f32 * item_h;
             let item_rect = Rect::from_min_size(
-                Pos2::new(modal_pos.x + content_pad, item_y),
+                Pos2::new(panel_rect.left() + content_pad, item_y),
                 egui::vec2(modal_w - content_pad * 2.0, item_h),
             );
 
