@@ -287,6 +287,22 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
             Pos2::new(panel_rect.left(), panel_rect.bottom() - clip - 12.0),
         ], thick_stroke));
 
+        // Nested chunk segments in the step notch
+        let h_height = 12.0;
+        let chunk_widths = vec![60.0, 8.0, 20.0];
+        let mut current_x = step_x + 15.0;
+        for &w in &chunk_widths {
+            if current_x + w + h_height > panel_rect.right() - 10.0 { break; }
+            let chunk_poly = vec![
+                Pos2::new(current_x, panel_rect.bottom()),
+                Pos2::new(current_x + w, panel_rect.bottom()),
+                Pos2::new(current_x + w + h_height, panel_rect.bottom() - h_height),
+                Pos2::new(current_x + h_height, panel_rect.bottom() - h_height),
+            ];
+            painter.add(egui::Shape::convex_polygon(chunk_poly, theme.accent, egui::Stroke::NONE));
+            current_x += w + 6.0;
+        }
+
         // Dot indicator
         painter.rect_filled(
             Rect::from_min_size(Pos2::new(panel_rect.left() + clip + 4.0, panel_rect.top() + 15.0), egui::vec2(4.0, 4.0)),
