@@ -18,8 +18,9 @@ fn main() -> eframe::Result<()> {
         "RusDeck",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_fullscreen(true)
-                .with_decorations(false),
+                .with_decorations(false)
+                .with_maximized(true)
+                .with_inner_size([1920.0, 1080.0]),
             ..Default::default()
         },
         Box::new(move |cc| {
