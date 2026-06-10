@@ -282,14 +282,8 @@ impl TerminalWidget {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        // Always resize buffer immediately (needed for correct rendering)
-        if let Ok(mut buf) = self.buffer.lock() {
-            buf.resize(cols, rows);
-        }
-
-        // Debounce PTY resize: only send when terminal size stays the same
-        // for a few consecutive frames. This prevents transient sizes during
-        // minimize/restore from triggering SIGWINCH → fish re-render storms.
+        // Track size stability across frames to avoid transient sizes
+        // (e.g. during minimize/restore) from shifting buffer content.
         if cols == self.last_pty_cols && rows == self.last_pty_rows {
             self.pty_resize_stable = self.pty_resize_stable.saturating_add(1);
         } else {
@@ -298,7 +292,11 @@ impl TerminalWidget {
             self.pty_resize_stable = 0;
         }
 
+        // Only commit resize (buffer + PTY atomically) when size is stable.
         if self.pty_resize_stable >= 3 {
+            if let Ok(mut buf) = self.buffer.lock() {
+                buf.resize(cols, rows);
+            }
             let _ = self.master.resize(PtySize {
                 rows: rows as u16,
                 cols: cols as u16,
