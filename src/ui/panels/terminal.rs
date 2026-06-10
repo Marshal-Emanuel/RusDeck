@@ -297,6 +297,18 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                                 let col = ((rel_x / actual_char_w) as usize).min(buf_width - 1);
                                 let row = row_range.start + ((rel_y / cell_h) as usize).min(visible_rows - 1);
                                 selection.end = Some((row, col));
+
+                                // Auto-scroll when dragging near top/bottom edge
+                                let scroll_margin = 30.0;
+                                if rel_y < scroll_margin && row_range.start > 0 {
+                                    let target_row = row_range.start.saturating_sub(3);
+                                    let target_y = origin.y + target_row as f32 * cell_h;
+                                    ui.scroll_to_rect(Rect::from_min_size(Pos2::new(origin.x, target_y), Vec2::new(1.0, cell_h)), None);
+                                } else if rel_y > response.rect.height() - scroll_margin && row_range.end < total_rows {
+                                    let target_row = (row_range.end + 3).min(total_rows);
+                                    let target_y = origin.y + target_row as f32 * cell_h;
+                                    ui.scroll_to_rect(Rect::from_min_size(Pos2::new(origin.x, target_y), Vec2::new(1.0, cell_h)), None);
+                                }
                             }
                         } else if response.clicked() || ui.input(|i| i.pointer.any_pressed()) {
                             selection.start = None;

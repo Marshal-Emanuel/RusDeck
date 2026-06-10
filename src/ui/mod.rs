@@ -160,7 +160,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
                 });
             });
 
-            // 3. Right-aligned region for Window Controls (Minimize, Maximize, Close)
+            // 3. Right-aligned region for Window Controls (Close only)
             let right_rect = Rect::from_min_max(
                 Pos2::new(tb.center().x + 100.0, tb.min.y),
                 tb.max
@@ -200,38 +200,6 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
 
                     if exit_resp.clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-
-                    ui.add_space(6.0);
-
-                    // Maximize / Restore button [ □ ] / [ ⬜ ]
-                    let is_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                    let max_label = if is_maximized { "⬜" } else { "□" };
-                    let (max_resp, max_painter) = ui.allocate_painter(Vec2::new(32.0, 24.0), egui::Sense::click());
-                    let max_hovered = max_resp.hovered();
-                    let max_color = if max_hovered { theme.accent } else { theme.low() };
-                    let max_frame_stroke = if max_hovered {
-                        Stroke::new(1.5, theme.accent)
-                    } else {
-                        Stroke::new(1.0, theme.mid())
-                    };
-
-                    max_painter.rect_stroke(
-                        max_resp.rect.shrink(1.0),
-                        0.0,
-                        max_frame_stroke,
-                    );
-
-                    max_painter.text(
-                        max_resp.rect.center(),
-                        Align2::CENTER_CENTER,
-                        max_label,
-                        egui::FontId::new(13.0, egui::FontFamily::Monospace),
-                        max_color,
-                    );
-
-                    if max_resp.clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
                     }
 
                 });
