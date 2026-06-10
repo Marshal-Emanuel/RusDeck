@@ -234,35 +234,6 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
                     }
 
-                    ui.add_space(6.0);
-
-                    // Minimize button [ _ ]
-                    let (min_resp, min_painter) = ui.allocate_painter(Vec2::new(32.0, 24.0), egui::Sense::click());
-                    let min_hovered = min_resp.hovered();
-                    let min_color = if min_hovered { theme.accent } else { theme.low() };
-                    let min_frame_stroke = if min_hovered {
-                        Stroke::new(1.5, theme.accent)
-                    } else {
-                        Stroke::new(1.0, theme.mid())
-                    };
-
-                    min_painter.rect_stroke(
-                        min_resp.rect.shrink(1.0),
-                        0.0,
-                        min_frame_stroke,
-                    );
-
-                    min_painter.text(
-                        min_resp.rect.center(),
-                        Align2::CENTER_CENTER,
-                        "_",
-                        egui::FontId::new(13.0, egui::FontFamily::Monospace),
-                        min_color,
-                    );
-
-                    if min_resp.clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                    }
                 });
             });
 

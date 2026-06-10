@@ -395,7 +395,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                                 }
                             }
 
-                            // Draw cursor
+                            // Draw cursor (full-width block with ~500ms blink)
                             if is_cursor_row {
                                 let cursor_x = origin.x + effective_cursor_col as f32 * actual_char_w;
                                 let cursor_y = origin.y + local_cursor_row as f32 * cell_h;
@@ -403,17 +403,20 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                                 if cursor_x >= clip_rect.min.x && cursor_x <= clip_rect.max.x
                                     && cursor_y >= clip_rect.min.y && cursor_y <= clip_rect.max.y
                                 {
-                                    painter.rect_filled(
-                                        Rect::from_min_size(
-                                            Pos2::new(cursor_x, cursor_y),
-                                            Vec2::new(actual_char_w * 0.55, cell_h),
-                                        ),
-                                        0.0,
-                                        Color32::from_rgb(0, 200, 160),
-                                );
+                                    let cursor_visible = (ui.ctx().input(|i| i.time) * 2.0).fract() < 0.5;
+                                    if cursor_visible {
+                                        painter.rect_filled(
+                                            Rect::from_min_size(
+                                                Pos2::new(cursor_x, cursor_y),
+                                                Vec2::new(actual_char_w, cell_h),
+                                            ),
+                                            0.0,
+                                            Color32::from_rgb(0, 200, 160),
+                                        );
+                                    }
+                                }
                             }
                         }
-                    }
 
                         ui.memory_mut(|m| m.data.insert_temp(selection_id, selection));
                     });
