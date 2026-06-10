@@ -31,7 +31,7 @@ fn main() -> eframe::Result<()> {
                 monitor::start_monitor_thread(state_monitor, ctx_monitor);
             });
 
-            let terminal = TerminalWidget::new(100, 30, cc.egui_ctx.clone())
+            let terminal = TerminalWidget::new(200, 50, cc.egui_ctx.clone())
                 .expect("Failed to create terminal");
             let terminals = vec![TerminalTab {
                 title: "Term 1".to_string(),
@@ -99,7 +99,7 @@ impl eframe::App for RusDeckApp {
 
             // If all terminals exited, spawn a new default one
             if self.terminals.is_empty() {
-                if let Some(new_term) = TerminalWidget::new(100, 30, ctx.clone()) {
+                if let Some(new_term) = TerminalWidget::new(200, 50, ctx.clone()) {
                     self.terminals.push(TerminalTab {
                         title: "Term 1".to_string(),
                         widget: new_term,

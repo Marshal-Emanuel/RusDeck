@@ -32,6 +32,8 @@ pub struct TerminalBuffer {
     pub height: usize,
     cursor_col: usize,
     cursor_row: usize,
+    saved_cursor_col: usize,
+    saved_cursor_row: usize,
     fg: [u8; 3],
     bg: [u8; 3],
     bold: bool,
@@ -46,6 +48,8 @@ impl TerminalBuffer {
             height,
             cursor_col: 0,
             cursor_row: 0,
+            saved_cursor_col: 0,
+            saved_cursor_row: 0,
             fg: [248, 248, 242],
             bg: [6, 10, 8],
             bold: false,
@@ -85,6 +89,8 @@ impl TerminalBuffer {
 
         self.cursor_col = self.cursor_col.min(width - 1);
         self.cursor_row = self.cursor_row.min(height - 1);
+        self.saved_cursor_col = self.saved_cursor_col.min(width - 1);
+        self.saved_cursor_row = self.saved_cursor_row.min(height - 1);
     }
 
     pub fn width(&self) -> usize { self.width }
@@ -142,6 +148,16 @@ impl TerminalBuffer {
             self.cursor_col -= 1;
             self.lines[self.cursor_row][self.cursor_col] = Cell::default();
         }
+    }
+
+    fn save_cursor(&mut self) {
+        self.saved_cursor_col = self.cursor_col;
+        self.saved_cursor_row = self.cursor_row;
+    }
+
+    fn restore_cursor(&mut self) {
+        self.cursor_col = self.saved_cursor_col.min(self.width - 1);
+        self.cursor_row = self.saved_cursor_row.min(self.height - 1);
     }
 
     fn erase_line(&mut self) {
@@ -404,6 +420,24 @@ impl AnsiParser {
                             // String Terminator (ST)
                             self.state = ParserState::Normal;
                         }
+                        's' => {
+                            // DECSC - Save cursor position
+                            buf.save_cursor();
+                            self.state = ParserState::Normal;
+                        }
+                        'u' => {
+                            // DECRC - Restore cursor position
+                            buf.restore_cursor();
+                            self.state = ParserState::Normal;
+                        }
+                        '\r' => {
+                            self.state = ParserState::Normal;
+                            buf.carriage_return();
+                        }
+                        '\n' => {
+                            self.state = ParserState::Normal;
+                            buf.newline();
+                        }
                         _ => {
                             self.state = ParserState::Normal;
                         }
@@ -419,6 +453,14 @@ impl AnsiParser {
                     } else if c == '?' || c == '>' || c == '!' || c == '$' {
                         // Private mode prefix — skip it but mark as intermediate
                         self.has_intermediate = true;
+                    } else if c == '\r' || c == '\n' || c == '\x07' {
+                        // Abort CSI sequence on control characters, process them normally
+                        self.state = ParserState::Normal;
+                        match c {
+                            '\r' => buf.carriage_return(),
+                            '\n' => buf.newline(),
+                            _ => {}
+                        }
                     } else {
                         self.push_param();
                         self.execute_csi(buf, c as u8, writer);
@@ -598,7 +640,18 @@ impl AnsiParser {
                 // Set/reset mode, reverse — ignore
             }
             b'n' => {
-                // Device status report — ignore
+                // Device status report — respond with cursor position
+                let param = self.params.first().copied().unwrap_or(0);
+                if param == 6 {
+                    // DSR: report cursor position as \x1b[{row};{col}R (1-based)
+                    let row = buf.cursor_row + 1;
+                    let col = buf.cursor_col + 1;
+                    let resp = format!("\x1b[{};{}R", row, col);
+                    if let Ok(mut w) = writer.lock() {
+                        let _ = w.write_all(resp.as_bytes());
+                        let _ = w.flush();
+                    }
+                }
             }
             _ => {}
         }

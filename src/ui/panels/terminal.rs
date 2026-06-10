@@ -1,4 +1,4 @@
-use egui::{Rect, Color32, Ui, RichText, Sense, Id, Align2, Pos2, ScrollArea, Vec2};
+use egui::{Rect, Color32, Ui, RichText, Sense, Id, Pos2, ScrollArea, Vec2};
 use crate::theme::Theme;
 use crate::ui::terminal::{TerminalWidget, TerminalTab};
 
@@ -204,7 +204,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                 );
                 if plus_resp.clicked() {
                     println!("DEBUG: Plus button clicked! Spawning new terminal...");
-                    match TerminalWidget::new(80, 24, ui.ctx().clone()) {
+                    match TerminalWidget::new(200, 50, ui.ctx().clone()) {
                         Some(new_term) => {
                             println!("DEBUG: Spawning new terminal succeeded!");
                             let tab_count = terminals.len();
@@ -239,12 +239,13 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
 
             let term = &mut terminals[*active_tab_idx].widget;
 
-            let cell_w = 8.5;
             let cell_h = 17.0;
+            let font_id = egui::FontId::new(13.0, egui::FontFamily::Monospace);
+            let actual_char_w = ui.fonts(|f| f.glyph_width(&font_id, 'M'));
             let available_size = ui.available_size();
             let pad_x = 16.0; // padding + scrollbar
             let pad_y = 10.0; // padding
-            let cols = (((available_size.x - pad_x) / cell_w).floor() as usize).max(40);
+            let cols = (((available_size.x - pad_x) / actual_char_w).floor() as usize).max(40);
             let rows = (((available_size.y - pad_y) / cell_h).floor() as usize).max(10);
 
             term.resize(cols, rows);
@@ -253,7 +254,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
             let (total_rows, content_w, buf_width, history_len, cursor_row, cursor_col) = {
                 if let Ok(buf_guard) = buffer.lock() {
                     let total_rows = buf_guard.history.len() + buf_guard.lines.len();
-                    let content_w = buf_guard.width() as f32 * cell_w;
+                    let content_w = buf_guard.width() as f32 * actual_char_w;
                     let (cursor_col, cursor_row) = buf_guard.cursor();
                     (total_rows, content_w, buf_guard.width(), buf_guard.history.len(), cursor_row, cursor_col)
                 } else {
@@ -263,8 +264,6 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
 
             if total_rows > 0 {
                 let font_size = 13.0;
-                let cell_w = 8.5;
-                let cell_h = 17.0;
 
                 ScrollArea::vertical()
                     .stick_to_bottom(true)
@@ -286,7 +285,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                             if let Some(pos) = ui.input(|i| i.pointer.press_origin()) {
                                 let rel_x = (pos.x - origin.x).max(0.0);
                                 let rel_y = (pos.y - origin.y).max(0.0);
-                                let col = ((rel_x / cell_w) as usize).min(buf_width - 1);
+                                let col = ((rel_x / actual_char_w) as usize).min(buf_width - 1);
                                 let row = row_range.start + ((rel_y / cell_h) as usize).min(visible_rows - 1);
                                 selection.start = Some((row, col));
                                 selection.end = Some((row, col));
@@ -295,7 +294,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                             if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
                                 let rel_x = (pos.x - origin.x).max(0.0);
                                 let rel_y = (pos.y - origin.y).max(0.0);
-                                let col = ((rel_x / cell_w) as usize).min(buf_width - 1);
+                                let col = ((rel_x / actual_char_w) as usize).min(buf_width - 1);
                                 let row = row_range.start + ((rel_y / cell_h) as usize).min(visible_rows - 1);
                                 selection.end = Some((row, col));
                             }
@@ -339,11 +338,11 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                             // Render selection highlight background
                             for col_idx in 0..buf_width {
                                 if is_cell_selected(virtual_row, col_idx, selection.start, selection.end) {
-                                    let x = origin.x + col_idx as f32 * cell_w;
+                                    let x = origin.x + col_idx as f32 * actual_char_w;
                                     painter.rect_filled(
                                         Rect::from_min_size(
                                             Pos2::new(x, y),
-                                            Vec2::new(cell_w, cell_h),
+                                            Vec2::new(actual_char_w, cell_h),
                                         ),
                                         0.0,
                                         Color32::from_rgba_unmultiplied(100, 149, 237, 80),
@@ -359,11 +358,18 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                                 }
                             }
 
+                            // Detect right-prompt situation: cursor row, cursor far right, text at left
+                            let cursor_virtual_row = history_len + cursor_row;
+                            let is_cursor_row = cursor_virtual_row >= row_range.start && cursor_virtual_row < row_range.end;
+                            let local_cursor_row = if is_cursor_row { cursor_virtual_row - row_range.start } else { 0 };
+                            let is_right_prompt = is_cursor_row && cursor_col > line_end + 10 && line_end > 0 && line_end < buf_width / 2;
+
+                            // For right prompt, render text right-aligned
+                            let render_start_col = if is_right_prompt { buf_width - line_end } else { 0 };
+                            let effective_cursor_col = if is_right_prompt { buf_width } else { cursor_col.min(line_end) };
+
                             if line_end > 0 {
-                                let mut job = egui::text::LayoutJob::default();
-                                let mut current_text = String::new();
-                                let mut current_fg = Color32::TRANSPARENT;
-                                let mut current_bold = false;
+                                let font_id = egui::FontId::new(font_size, egui::FontFamily::Monospace);
 
                                 for col_idx in 0..line_end {
                                     let cell = line_cells[col_idx];
@@ -377,64 +383,37 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                                         Color32::from_rgb(cell.fg[0], cell.fg[1], cell.fg[2])
                                     };
 
-                                    if current_text.is_empty() {
-                                        current_fg = fg;
-                                        current_bold = cell.bold;
-                                        current_text.push(cell.c);
-                                    } else if fg == current_fg && cell.bold == current_bold {
-                                        current_text.push(cell.c);
-                                    } else {
-                                        job.append(
-                                            &current_text,
-                                            0.0,
-                                            egui::TextFormat {
-                                                font_id: egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                                color: current_fg,
-                                                ..Default::default()
-                                            },
-                                        );
-                                        current_text.clear();
-                                        current_fg = fg;
-                                        current_bold = cell.bold;
-                                        current_text.push(cell.c);
-                                    }
-                                }
-
-                                if !current_text.is_empty() {
-                                    job.append(
-                                        &current_text,
-                                        0.0,
-                                        egui::TextFormat {
-                                            font_id: egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                            color: current_fg,
-                                            ..Default::default()
-                                        },
+                                    let render_col = render_start_col + col_idx;
+                                    let cx = origin.x + render_col as f32 * actual_char_w;
+                                    painter.text(
+                                        Pos2::new(cx, y),
+                                        egui::Align2::LEFT_TOP,
+                                        cell.c.to_string(),
+                                        font_id.clone(),
+                                        fg,
                                     );
                                 }
-
-                                let galley = painter.layout_job(job);
-                                painter.galley(Pos2::new(origin.x, y), galley, Color32::TRANSPARENT);
                             }
-                        }
 
-                        let cursor_virtual_row = history_len + cursor_row;
-                        if cursor_virtual_row >= row_range.start && cursor_virtual_row < row_range.end {
-                            let local_cursor_row = cursor_virtual_row - row_range.start;
-                            let cursor_x = origin.x + cursor_col as f32 * cell_w;
-                            let cursor_y = origin.y + local_cursor_row as f32 * cell_h;
+                            // Draw cursor
+                            if is_cursor_row {
+                                let cursor_x = origin.x + effective_cursor_col as f32 * actual_char_w;
+                                let cursor_y = origin.y + local_cursor_row as f32 * cell_h;
 
-                            if cursor_x >= clip_rect.min.x && cursor_x <= clip_rect.max.x
-                                && cursor_y >= clip_rect.min.y && cursor_y <= clip_rect.max.y
-                            {
-                                painter.text(
-                                    Pos2::new(cursor_x, cursor_y),
-                                    Align2::LEFT_TOP,
-                                    "▌",
-                                    egui::FontId::new(font_size, egui::FontFamily::Monospace),
-                                    Color32::from_rgb(0, 200, 160),
+                                if cursor_x >= clip_rect.min.x && cursor_x <= clip_rect.max.x
+                                    && cursor_y >= clip_rect.min.y && cursor_y <= clip_rect.max.y
+                                {
+                                    painter.rect_filled(
+                                        Rect::from_min_size(
+                                            Pos2::new(cursor_x, cursor_y),
+                                            Vec2::new(actual_char_w * 0.55, cell_h),
+                                        ),
+                                        0.0,
+                                        Color32::from_rgb(0, 200, 160),
                                 );
                             }
                         }
+                    }
 
                         ui.memory_mut(|m| m.data.insert_temp(selection_id, selection));
                     });
