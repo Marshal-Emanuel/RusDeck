@@ -211,9 +211,11 @@ pub struct TerminalWidget {
     _child: Box<dyn Child + Send>,
     _reader: thread::JoinHandle<()>,
     master: Box<dyn MasterPty + Send>,
-    last_pty_cols: usize,
-    last_pty_rows: usize,
-    pty_resize_stable: u8,
+    request_cols: usize,
+    request_rows: usize,
+    committed_cols: usize,
+    committed_rows: usize,
+    resize_stable: u8,
 }
 
 impl TerminalWidget {
@@ -260,9 +262,11 @@ impl TerminalWidget {
             _child: child,
             _reader,
             master: pair.master,
-            last_pty_cols: cols,
-            last_pty_rows: rows,
-            pty_resize_stable: 3,
+            request_cols: cols,
+            request_rows: rows,
+            committed_cols: cols,
+            committed_rows: rows,
+            resize_stable: 3,
         })
     }
 
@@ -282,27 +286,40 @@ impl TerminalWidget {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        // Track size stability across frames to avoid transient sizes
+        // Track request stability across frames to avoid transient sizes
         // (e.g. during minimize/restore) from shifting buffer content.
-        if cols == self.last_pty_cols && rows == self.last_pty_rows {
-            self.pty_resize_stable = self.pty_resize_stable.saturating_add(1);
+        if cols == self.request_cols && rows == self.request_rows {
+            self.resize_stable = self.resize_stable.saturating_add(1);
         } else {
-            self.last_pty_cols = cols;
-            self.last_pty_rows = rows;
-            self.pty_resize_stable = 0;
+            self.request_cols = cols;
+            self.request_rows = rows;
+            self.resize_stable = 0;
         }
 
-        // Only commit resize (buffer + PTY atomically) when size is stable.
-        if self.pty_resize_stable >= 3 {
-            if let Ok(mut buf) = self.buffer.lock() {
-                buf.resize(cols, rows);
+        // Commit only when the request has been stable for 3+ frames.
+        if self.resize_stable >= 3 {
+            let final_cols = cols;
+            let final_rows = if rows.abs_diff(self.committed_rows) <= 1 && cols == self.committed_cols {
+                // 1-row tolerance: WM margins can shift available height by < 1 row
+                // between maximized/restored. Skip the resize so content doesn't jitter.
+                self.committed_rows
+            } else {
+                rows
+            };
+
+            if final_cols != self.committed_cols || final_rows != self.committed_rows {
+                self.committed_cols = final_cols;
+                self.committed_rows = final_rows;
+                if let Ok(mut buf) = self.buffer.lock() {
+                    buf.resize(final_cols, final_rows);
+                }
+                let _ = self.master.resize(PtySize {
+                    rows: final_rows as u16,
+                    cols: final_cols as u16,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
             }
-            let _ = self.master.resize(PtySize {
-                rows: rows as u16,
-                cols: cols as u16,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
         }
     }
 
