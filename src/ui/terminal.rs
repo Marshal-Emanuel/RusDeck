@@ -211,6 +211,9 @@ pub struct TerminalWidget {
     _child: Box<dyn Child + Send>,
     _reader: thread::JoinHandle<()>,
     master: Box<dyn MasterPty + Send>,
+    last_pty_cols: usize,
+    last_pty_rows: usize,
+    pty_resize_stable: u8,
 }
 
 impl TerminalWidget {
@@ -257,6 +260,9 @@ impl TerminalWidget {
             _child: child,
             _reader,
             master: pair.master,
+            last_pty_cols: cols,
+            last_pty_rows: rows,
+            pty_resize_stable: 3,
         })
     }
 
@@ -276,18 +282,23 @@ impl TerminalWidget {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        let size_changed = if let Ok(mut buf) = self.buffer.lock() {
-            if buf.width() == cols && buf.height() == rows {
-                false
-            } else {
-                buf.resize(cols, rows);
-                true
-            }
-        } else {
-            false
-        };
+        // Always resize buffer immediately (needed for correct rendering)
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.resize(cols, rows);
+        }
 
-        if size_changed {
+        // Debounce PTY resize: only send when terminal size stays the same
+        // for a few consecutive frames. This prevents transient sizes during
+        // minimize/restore from triggering SIGWINCH → fish re-render storms.
+        if cols == self.last_pty_cols && rows == self.last_pty_rows {
+            self.pty_resize_stable = self.pty_resize_stable.saturating_add(1);
+        } else {
+            self.last_pty_cols = cols;
+            self.last_pty_rows = rows;
+            self.pty_resize_stable = 0;
+        }
+
+        if self.pty_resize_stable >= 3 {
             let _ = self.master.resize(PtySize {
                 rows: rows as u16,
                 cols: cols as u16,
