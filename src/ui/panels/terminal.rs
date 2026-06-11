@@ -408,7 +408,8 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
                             }
 
                             // Draw cursor (full-width block with ~500ms blink)
-                            if is_cursor_row {
+                            // Skip if right-prompt mode - oh-my-posh handles cursor display there
+                            if is_cursor_row && !is_right_prompt {
                                 let cursor_x = origin.x + effective_cursor_col as f32 * actual_char_w;
                                 let cursor_y = origin.y + local_cursor_row as f32 * cell_h;
 
