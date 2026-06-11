@@ -374,7 +374,7 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
 
                             // Detect right-prompt situation: cursor row, cursor far right, text at left
                             let cursor_virtual_row = history_len + cursor_row;
-                            let is_cursor_row = cursor_virtual_row >= row_range.start && cursor_virtual_row < row_range.end;
+                            let is_cursor_row = virtual_row == cursor_virtual_row;
                             let local_cursor_row = if is_cursor_row { cursor_virtual_row - row_range.start } else { 0 };
                             let is_right_prompt = is_cursor_row && cursor_col > line_end + 10 && line_end > 0 && line_end < buf_width / 2;
 
