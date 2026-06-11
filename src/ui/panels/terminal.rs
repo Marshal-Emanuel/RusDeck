@@ -364,7 +364,9 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
 
                             let mut line_end = 0;
                             for col_idx in (0..buf_width).rev() {
-                                if line_cells[col_idx].c != ' ' {
+                                let c = line_cells[col_idx].c;
+                                // Skip oh-my-posh cursor indicator characters when finding line end
+                                if c != ' ' && !matches!(c, '▮' | '█' | '▌' | '▐' | '▣') {
                                     line_end = col_idx + 1;
                                     break;
                                 }
@@ -385,6 +387,13 @@ pub fn draw_terminal(ui: &mut Ui, rect: Rect, terminals: &mut Vec<TerminalTab>, 
 
                                 for col_idx in 0..line_end {
                                     let cell = line_cells[col_idx];
+
+                                    // Skip oh-my-posh cursor indicator characters
+                                    // (▮ U+25AE, █ U+2588, ▌ U+258C, ▐ U+2590, ▣ U+25A3)
+                                    if matches!(cell.c, '▮' | '█' | '▌' | '▐' | '▣') {
+                                        continue;
+                                    }
+
                                     let fg = if cell.bold {
                                         Color32::from_rgb(
                                             (cell.fg[0] as u32 + 40).min(255) as u8,
