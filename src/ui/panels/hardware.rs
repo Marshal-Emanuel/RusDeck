@@ -98,7 +98,29 @@ pub fn draw_hardware(painter: &Painter, rect: Rect, state: &AppState, theme: &Th
         0.0
     };
     draw_segmented_bar(painter, Pos2::new(label_x, y), bar_max_width, swap_pct, theme.dimmed(), theme);
-    y += BAR_HEIGHT + 16.0;
+    y += BAR_HEIGHT + 10.0;
+
+    // Storage Row
+    if state.system.storage_total_gb > 0.0 {
+        painter.text(
+            Pos2::new(label_x, y),
+            Align2::LEFT_TOP,
+            "DISK",
+            FontId::monospace(14.0),
+            theme.high(),
+        );
+        painter.text(
+            Pos2::new(value_x, y),
+            Align2::RIGHT_TOP,
+            format!("{:.1}G / {:.0}G", state.system.storage_used_gb, state.system.storage_total_gb),
+            FontId::monospace(14.0),
+            theme.full(),
+        );
+        y += 18.0;
+        let disk_pct = state.system.storage_used_gb / state.system.storage_total_gb;
+        draw_segmented_bar(painter, Pos2::new(label_x, y), bar_max_width, disk_pct, theme.accent, theme);
+        y += BAR_HEIGHT + 10.0;
+    }
 
     // CPU waveform history
     if !state.cpu_history.is_empty() {

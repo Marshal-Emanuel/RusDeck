@@ -15,6 +15,7 @@ use panels::network::draw_network;
 use panels::processes::draw_processes;
 use panels::system_logs::draw_system_logs;
 use panels::terminal::draw_terminal;
+use panels::temperature::draw_temperature;
 use terminal::TerminalTab;
 
 pub fn setup_visuals(ctx: &egui::Context) {
@@ -94,6 +95,7 @@ pub fn draw(ctx: &egui::Context, state: &AppState, theme: &mut Theme, theme_vari
             });
             
             draw_network(&painter, layout.network, state, theme);
+            draw_temperature(&painter, layout.temperature, state, theme);
             draw_processes(&painter, layout.processes, state, theme);
             draw_system_logs(&painter, layout.system_logs, state, theme);
 

@@ -5,6 +5,7 @@ pub struct Layout {
     pub hardware: Rect,
     pub storage: Rect,
     pub terminal: Rect,
+    pub temperature: Rect,
     pub network: Rect,
     pub processes: Rect,
     pub system_logs: Rect,
@@ -30,6 +31,15 @@ impl Layout {
         let left_hw_h = main_height * 0.55;
         let left_storage_top = main_top + left_hw_h + gap;
 
+        // Right side: divide available space dynamically
+        let right_available_h = main_bottom - main_top;
+        let temp_h = (right_available_h * 0.22).max(60.0);
+        let network_h = (right_available_h * 0.38).max(80.0);
+        let processes_h = right_available_h - temp_h - network_h - gap - gap;
+        let temp_top = main_top;
+        let network_top = temp_top + temp_h + gap;
+        let processes_top = network_top + network_h + gap;
+
         let bottom_top = content_bottom - bottom_h;
 
         Self {
@@ -49,13 +59,17 @@ impl Layout {
                 Pos2::new(mid_left, main_top),
                 Pos2::new(mid_right, main_bottom),
             ),
+            temperature: Rect::from_min_max(
+                Pos2::new(screen_width - pad - side_w, temp_top),
+                Pos2::new(screen_width - pad, temp_top + temp_h),
+            ),
             network: Rect::from_min_max(
-                Pos2::new(screen_width - pad - side_w, main_top),
-                Pos2::new(screen_width - pad, main_top + main_height / 2.0),
+                Pos2::new(screen_width - pad - side_w, network_top),
+                Pos2::new(screen_width - pad, network_top + network_h),
             ),
             processes: Rect::from_min_max(
-                Pos2::new(screen_width - pad - side_w, main_top + main_height / 2.0 + gap / 2.0),
-                Pos2::new(screen_width - pad, main_bottom),
+                Pos2::new(screen_width - pad - side_w, processes_top),
+                Pos2::new(screen_width - pad, processes_top + processes_h.max(100.0)),
             ),
             system_logs: Rect::from_min_max(
                 Pos2::new(pad, bottom_top),
