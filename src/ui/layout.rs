@@ -33,7 +33,7 @@ impl Layout {
 
         // Right side: divide available space dynamically
         let right_available_h = main_bottom - main_top;
-        let temp_h = (right_available_h * 0.22).max(60.0);
+        let temp_h = (right_available_h * 0.12).max(50.0);
         let network_h = (right_available_h * 0.38).max(80.0);
         let processes_h = right_available_h - temp_h - network_h - gap - gap;
         let temp_top = main_top;
