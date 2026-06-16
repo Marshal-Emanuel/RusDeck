@@ -1,5 +1,8 @@
 use std::collections::VecDeque;
-use std::process::Command;
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 
 #[derive(Clone)]
 pub struct LogLine {
@@ -10,97 +13,107 @@ pub struct LogLine {
 pub struct LogBuffer {
     lines: VecDeque<LogLine>,
     max_cap: usize,
+    rx: Receiver<LogLine>,
 }
 
 impl LogBuffer {
     pub fn new(max_cap: usize) -> Self {
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            // Try journalctl -f first; fall back to tail -f on a syslog file
+            let mut child = Command::new("journalctl")
+                .args(["--no-pager", "-f", "-n", "200", "-o", "short-iso", "--quiet"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn();
+
+            if child.is_err() || !child.as_ref().map(|_| true).unwrap_or(false) {
+                // journalctl unavailable — fall back to tail -f on syslog
+                let syslog_candidates = [
+                    "/var/log/syslog",
+                    "/var/log/messages",
+                    "/var/log/user.log",
+                ];
+                if let Some(path) = syslog_candidates.iter().find(|p| std::path::Path::new(p).exists()) {
+                    child = Command::new("tail")
+                        .args(["-f", "-n", "200", path])
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::null())
+                        .spawn();
+                }
+            }
+
+            let mut child = match child {
+                Ok(c) => c,
+                Err(_) => return, // Neither source available — give up silently
+            };
+
+            let stdout = match child.stdout.take() {
+                Some(s) => s,
+                None => return,
+            };
+
+            let reader = BufReader::new(stdout);
+            for raw_line in reader.lines() {
+                match raw_line {
+                    Ok(line) if !line.is_empty() => {
+                        let parsed = Self::parse_line(&line);
+                        // If the channel receiver is gone (app exited), stop streaming
+                        if tx.send(parsed).is_err() {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Clean up the child process when the stream ends
+            let _ = child.wait();
+        });
+
         Self {
             lines: VecDeque::with_capacity(max_cap),
             max_cap,
+            rx,
         }
     }
 
+    /// Drain all available lines from the stream channel and append them to the buffer.
+    /// This is non-blocking — if no new lines arrived since last call it returns immediately.
     pub fn poll(&mut self) {
-        let Some(new_lines) = Self::read_journalctl()
-            .or_else(|| Self::read_syslog_file())
-        else { return };
-
-        if new_lines.is_empty() {
-            return;
-        }
-
-        self.lines.clear();
-        for line in new_lines.into_iter().rev() {
-            if self.lines.len() >= self.max_cap {
-                break;
+        loop {
+            match self.rx.try_recv() {
+                Ok(log_line) => {
+                    self.lines.push_back(log_line);
+                    if self.lines.len() > self.max_cap {
+                        self.lines.pop_front();
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
             }
-            self.lines.push_front(line);
         }
     }
 
-    fn read_journalctl() -> Option<Vec<LogLine>> {
-        let output = Command::new("journalctl")
-            .args(["--no-pager", "-n", "200", "-o", "short-iso", "--quiet"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
+    fn parse_line(line: &str) -> LogLine {
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        if parts.len() >= 2 {
+            LogLine {
+                timestamp: parts[0].to_string(),
+                message: parts[1].to_string(),
+            }
+        } else {
+            LogLine {
+                timestamp: String::new(),
+                message: line.to_string(),
+            }
         }
-        let text = String::from_utf8(output.stdout).ok()?;
-        Some(Self::parse_lines(&text))
-    }
-
-    fn read_syslog_file() -> Option<Vec<LogLine>> {
-        let candidates = [
-            "/var/log/syslog",
-            "/var/log/messages",
-            "/var/log/user.log",
-        ];
-        let path = candidates.iter().find(|p| std::path::Path::new(p).exists())?;
-        let content = std::fs::read_to_string(path).ok()?;
-        let log_lines: Vec<LogLine> = content.lines()
-            .filter(|l| !l.is_empty())
-            .filter(|l| !Self::is_noise(l))
-            .map(|line| {
-                let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                let (ts, msg) = if parts.len() >= 2 {
-                    (parts[0].to_string(), parts[1].to_string())
-                } else {
-                    (String::new(), line.to_string())
-                };
-                LogLine { timestamp: ts, message: msg }
-            })
-            .collect();
-        let last = if log_lines.len() > 200 { &log_lines[log_lines.len() - 200..] } else { &log_lines };
-        Some(last.to_vec())
-    }
-
-    fn parse_lines(text: &str) -> Vec<LogLine> {
-        text.lines()
-            .filter(|l| !l.is_empty())
-            .filter(|l| !Self::is_noise(l))
-            .map(|line| {
-                let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                let (ts, msg) = if parts.len() >= 2 {
-                    (parts[0].to_string(), parts[1].to_string())
-                } else {
-                    (String::new(), line.to_string())
-                };
-                LogLine { timestamp: ts, message: msg }
-            })
-            .collect()
-    }
-
-    fn is_noise(line: &str) -> bool {
-        let patterns = [
-            "Can't update stage views actor",
-            "client bug: event processing lagging behind",
-            "meta_window_set_geom",
-        ];
-        patterns.iter().any(|p| line.contains(p))
     }
 
     pub fn get_recent(&self, count: usize) -> Vec<&LogLine> {
-        self.lines.iter().take(count).collect()
+        // Show the most recently received lines at the bottom — natural stream order
+        let skip = self.lines.len().saturating_sub(count);
+        self.lines.iter().skip(skip).collect()
     }
 }

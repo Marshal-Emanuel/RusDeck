@@ -19,7 +19,7 @@ const REFRESH_DISK: u64 = 10;
 const REFRESH_TEMP: u64 = 5;
 const REFRESH_NETWORK: u64 = 1;
 const REFRESH_PROCESSES: u64 = 2;
-const REFRESH_LOGS: u64 = 10; // Log checks changed to 10 seconds to drastically reduce CPU overhead
+
 
 pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, ctx: egui::Context) {
     let mut log_buffer = logs::LogBuffer::new(200);
@@ -38,7 +38,7 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, ctx: egui::Context) {
         let mut last_temp = start;
         let mut last_network = start;
         let mut last_processes = start;
-        let mut last_logs = start;
+
 
         // Perform initial reads to populate immediately on startup
         sys.refresh_cpu_specifics(CpuRefreshKind::everything());
@@ -47,6 +47,7 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, ctx: egui::Context) {
         disks.refresh();
         components.refresh();
         sys.refresh_processes();
+        // Initial seed: drain whatever backlog journalctl -f emits immediately
         log_buffer.poll();
 
         loop {
@@ -169,11 +170,9 @@ pub fn start_monitor_thread(state: Arc<RwLock<AppState>>, ctx: egui::Context) {
                 state_changed = true;
             }
 
-            // 7. System Logs (10s)
-            if now.duration_since(last_logs) >= Duration::from_secs(REFRESH_LOGS) {
+            // 7. System Logs — non-blocking channel drain (runs every loop tick, ~200ms)
+            {
                 log_buffer.poll();
-                last_logs = now;
-
                 let recent_logs = log_buffer.get_recent(200);
 
                 if let Ok(mut state_guard) = state.write() {

@@ -83,8 +83,13 @@ pub fn draw_system_logs(painter: &Painter, rect: Rect, state: &AppState, theme: 
     let row_h = 22.0;
     let max_rows = ((rect.height() - 44.0) / row_h) as usize;
 
-    for (i, log) in state.logs.iter().take(max_rows).enumerate() {
-        let base_alpha = (max_rows - i) as f32 / max_rows as f32 * 0.8 + 0.2;
+    let skip = state.logs.len().saturating_sub(max_rows);
+    let visible_logs: Vec<_> = state.logs.iter().skip(skip).collect();
+    let actual_rows = visible_logs.len();
+
+    for (i, log) in visible_logs.into_iter().enumerate() {
+        let pos_from_bottom = actual_rows.saturating_sub(1).saturating_sub(i);
+        let base_alpha = 1.0 - (pos_from_bottom as f32 / max_rows as f32 * 0.8).min(0.8);
 
         painter.text(
             Pos2::new(text_x, y),
