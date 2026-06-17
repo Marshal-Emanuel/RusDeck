@@ -21,28 +21,44 @@ impl LogBuffer {
         let (tx, rx) = mpsc::channel();
 
         thread::spawn(move || {
-            // Try journalctl -f first; fall back to tail -f on a syslog file
-            let mut child = Command::new("journalctl")
-                .args(["--no-pager", "-f", "-n", "200", "-o", "short-iso", "--quiet"])
+            // Try spawning with stdbuf -oL to force line-buffering on journalctl.
+            // This prevents systemd from block-buffering stdout when piped.
+            let mut child = Command::new("stdbuf")
+                .args(["-oL", "journalctl", "--no-pager", "-f", "-n", "200", "-o", "short-iso", "--quiet"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn();
 
-            if child.is_err() || !child.as_ref().map(|_| true).unwrap_or(false) {
-                // journalctl unavailable — fall back to tail -f on syslog
-                let syslog_candidates = [
-                    "/var/log/syslog",
-                    "/var/log/messages",
-                    "/var/log/user.log",
-                ];
-                if let Some(path) = syslog_candidates.iter().find(|p| std::path::Path::new(p).exists()) {
-                    child = Command::new("tail")
-                        .args(["-f", "-n", "200", path])
-                        .stdout(Stdio::piped())
-                        .stderr(Stdio::null())
-                        .spawn();
+            // If stdbuf is not available, spawn journalctl directly.
+            let mut child = match child {
+                Ok(c) => Ok(c),
+                Err(_) => Command::new("journalctl")
+                    .args(["--no-pager", "-f", "-n", "200", "-o", "short-iso", "--quiet"])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn(),
+            };
+
+            // If journalctl is not available (or errors on spawn), fall back to tail -f
+            let mut child = match child {
+                Ok(c) => Ok(c),
+                Err(_) => {
+                    let syslog_candidates = [
+                        "/var/log/syslog",
+                        "/var/log/messages",
+                        "/var/log/user.log",
+                    ];
+                    if let Some(path) = syslog_candidates.iter().find(|p| std::path::Path::new(p).exists()) {
+                        Command::new("tail")
+                            .args(["-f", "-n", "200", path])
+                            .stdout(Stdio::piped())
+                            .stderr(Stdio::null())
+                            .spawn()
+                    } else {
+                        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "No log source available"))
+                    }
                 }
-            }
+            };
 
             let mut child = match child {
                 Ok(c) => c,
@@ -63,6 +79,9 @@ impl LogBuffer {
                         if tx.send(parsed).is_err() {
                             break;
                         }
+                        // Smooth out the stream to create a futuristic scrolling effect!
+                        // This causes the initial backlog (and any bursts) to stream line-by-line visually.
+                        std::thread::sleep(std::time::Duration::from_millis(30));
                     }
                     _ => {}
                 }

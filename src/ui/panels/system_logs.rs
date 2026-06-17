@@ -81,6 +81,8 @@ pub fn draw_system_logs(painter: &Painter, rect: Rect, state: &AppState, theme: 
 
     let mut y = rect.top() + 36.0;
     let row_h = 22.0;
+    
+    // Calculate how many rows fit
     let max_rows = ((rect.height() - 44.0) / row_h) as usize;
 
     let skip = state.logs.len().saturating_sub(max_rows);
